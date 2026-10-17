@@ -183,16 +183,16 @@ def maybe_refresh_racer_history(con):
     # existing racer_period_stats table rather than requiring the full history
     # on disk. racer_history (change-detection) is then recomputed from the
     # combined (old + new) table, not from raw files.
-    new_records = []
+    new_records = []  # list of (record, source_filename)
     for p in sorted(kibetsu_dir.glob("fan*.txt")):
         y, per = _fan_filename_period(p.stem + ".lzh")
         if (y, per) in known_periods:
             continue  # an old file that happened to already exist locally
         records, _errors = parse_fan_file(p.read_bytes())
-        new_records += records
+        new_records += [(r, p.name) for r in records]
 
     racers_updates, new_history_rows = {}, []
-    for r in new_records:
+    for r, source_file in new_records:
         racers_updates[r.toroku_no] = {
             "toroku_no": r.toroku_no, "birth_date": r.birth_date, "sex": r.sex,
             "training_period": r.training_period, "hometown": r.hometown,
@@ -204,6 +204,7 @@ def maybe_refresh_racer_history(con):
             "calc_from": r.calc_from, "calc_to": r.calc_to,
             "win_rate": r.win_rate, "place_rate": r.place_rate,
             "avg_st": r.avg_st, "starts": r.starts,
+            "source_file": source_file,
         })
 
     if not new_history_rows:
