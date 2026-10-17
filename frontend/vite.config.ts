@@ -15,6 +15,12 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: "autoUpdate",
+      // We register the service worker ourselves in main.ts via
+      // `virtual:pwa-register` (with an onNeedRefresh handler that forces an
+      // immediate reload) instead of using the plugin's auto-injected script,
+      // which only calls register() once and never checks for or applies
+      // updates on its own.
+      injectRegister: null,
       includeAssets: ["icons/*.png"],
       manifest: {
         name: "ボートレース選手成績データ",
