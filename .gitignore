@@ -3,8 +3,14 @@
 # branch by CI instead, not on main.
 data/
 
-# Exported site data is built fresh each run / deployed via Pages, not committed to main.
-site/data/
+# site/ is entirely generated: scripts/export_parquet.py writes site/data/*.parquet
+# and `npm run build` (in frontend/) writes the rest. CI builds both fresh each run
+# and deploys straight to Pages -- none of it is committed to any branch.
+site/
+
+# Node (frontend/)
+frontend/node_modules/
+frontend/dist/
 
 # Python
 __pycache__/
@@ -17,3 +23,4 @@ docs/venue*_raw.txt
 docs/check_*.txt
 docs/name_change_example.txt
 docs/layout_inspection.txt
+frontend/tsconfig.tsbuildinfo

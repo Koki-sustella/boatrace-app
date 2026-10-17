@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: pip install -r main/requirements.txt
 
       - name: Restore persisted DuckDB database
@@ -43,9 +43,24 @@ jobs:
           mkdir -p main/data
           cp data-state/boatrace.duckdb main/data/boatrace.duckdb
 
-      - name: Run daily update
+      - name: Run daily update (fetch, parse, aggregate, export Parquet)
         working-directory: main
         run: python scripts/daily_update.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: main/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: main/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: main/frontend
+        run: npm run build
 
       - name: Persist updated database back to data-state branch
         run: |
