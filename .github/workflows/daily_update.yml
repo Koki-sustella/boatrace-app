@@ -1,0 +1,67 @@
+name: Daily data update
+
+on:
+  schedule:
+    # 19:30 UTC = 翌4:30 JST。前日分のレース結果が出揃っている時間帯を狙う。
+    - cron: "30 19 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          path: main
+
+      - name: Checkout data-state branch
+        uses: actions/checkout@v4
+        with:
+          ref: data-state
+          path: data-state
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r main/requirements.txt
+
+      - name: Restore persisted DuckDB database
+        run: |
+          mkdir -p main/data
+          cp data-state/boatrace.duckdb main/data/boatrace.duckdb
+
+      - name: Run daily update
+        working-directory: main
+        run: python scripts/daily_update.py
+
+      - name: Persist updated database back to data-state branch
+        run: |
+          cp main/data/boatrace.duckdb data-state/boatrace.duckdb
+          cd data-state
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add boatrace.duckdb
+          git diff --cached --quiet && echo "no changes" || git commit -m "Daily data update $(date -u +%Y-%m-%d)"
+          git push
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: main/site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

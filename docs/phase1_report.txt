@@ -1,0 +1,88 @@
+# Phase 1 取り込み試作 検証レポート
+
+races table: 1872 rows
+entries (K-file boat results) table: 11232 rows
+program_entries (B-file) table: 3816 rows
+
+## サンプル: races 先頭5行
+  venue_code    date  race_no   title  distance_m weather wind_dir  wind_speed_m  wave_cm
+0         22  250115        1  カタメン１予        1800       雨        北             4        4
+1         22  250115        2      予選        1800      曇り        北             4        4
+2         22  250115        3  カタメン３予        1800      曇り        北             4        4
+3         22  250115        4      予選        1800       雨        北             4        4
+4         22  250115        5      予選        1800       雨        北             3        3
+
+## サンプル: entries 先頭10行（1レース分）
+  venue_code    date  race_no finish  is_exception exception_label  frame reg_no  name  motor_no  boat_no  exhibition_time  entry_course  start_timing  start_is_flying  race_time_sec
+0         22  250115        1     01         False            None      2   4330  奈須啓太        46      117             6.84           2.0          0.06            False          110.5
+1         22  250115        1     02         False            None      3   4299  中島浩哉        70      166             6.88           3.0          0.07            False          111.9
+2         22  250115        1     03         False            None      1   4485  楠原正剛        30      123             6.83           1.0          0.12            False          114.2
+3         22  250115        1     04         False            None      4   3372  加藤雅之        61      167             6.80           4.0          0.11            False          114.7
+4         22  250115        1     05         False            None      5   5067  山田真聖        47      133             6.80           5.0          0.07            False            NaN
+5         22  250115        1     06         False            None      6   5215  石丸小槙        52      147             6.82           6.0          0.07            False            NaN
+
+## 例外着順コードの出現状況（is_exception=true の内訳）
+  exception_label   n
+0           フライング  53
+1          失格(責任)  48
+2         失格(責任外)  43
+3         欠場(責任外)  14
+4            妨害失格   9
+5          欠場(責任)   3
+
+## グレード確認: races.title の distinct 値（グレード文字列が無いことの確認）
+       title    n
+0         予選  672
+1         一般  292
+2       予選特賞  121
+3       準優勝戦   80
+4        一般戦   69
+5       予選特選   68
+6        選抜戦   40
+7        優勝戦   27
+8       一般特選   17
+9   予選  進入固定   16
+10    予選特別Ｂ戦   12
+11     ドリーム戦   11
+12    ウインウイン   10
+13    予選特別Ａ戦   10
+14        特選   10
+15        特賞    9
+16    ランチタイム    8
+17  一般  進入固定    8
+18    カタメン３予    8
+19    カタメン１予    8
+-> 'title' は予選/一般/準優勝戦/優勝戦などの『レース種別』であり、SG/G1/G2/G3の
+   グレードは一切含まれない。グレードは別途、公式サイトの月間スケジュールページ
+   (is-gradeColorSG 等のCSSクラス、venue code+日付で特定可能) から取得するのが
+   確実な方法であることを確認した。
+
+## 欠場時のフィールド欠損パターン例 (K0の行)
+  venue_code    date  race_no finish  is_exception exception_label  frame reg_no  name  motor_no  boat_no  exhibition_time  entry_course  start_timing  start_is_flying  race_time_sec
+0         19  250115        2   None          True         欠場(責任外)      5   4030  森高一真        18       60              NaN           NaN           NaN            False            NaN
+1         19  250115        8   None          True         欠場(責任外)      2   4030  森高一真        18       60              NaN           NaN           NaN            False            NaN
+2         10  250515       12   None          True         欠場(責任外)      2   4308   河村了        27       15              NaN           NaN           NaN            False            NaN
+
+## フライング時のST扱い例 (F)
+  venue_code    date  race_no finish  is_exception exception_label  frame reg_no  name  motor_no  boat_no  exhibition_time  entry_course  start_timing  start_is_flying  race_time_sec
+0         19  250115        5   None          True           フライング      2   4140  梶野学志        11       15             6.87           2.0          0.02             True            NaN
+1         19  250115        5   None          True           フライング      3   4776  竹田和哉        54       53             6.83           3.0          0.03             True            NaN
+2         17  250115        5   None          True           フライング      6   3931  黒崎竜也        68       70             6.67           6.0          0.02             True            NaN
+
+## レースタイムが記録されている着順の分布 (上位のみ記録される、という仮説の検証)
+  finish     n  with_time
+0     01  1872       1872
+1     02  1872       1872
+2     03  1871       1871
+3     04  1864       1864
+4     05  1848        449
+5     06  1735        421
+
+## program_entries サンプル
+  venue_code    date  race_no title  distance_m  frame reg_no  name  age branch  weight klass  national_win_rate  national_2rentai_rate  local_win_rate  local_2rentai_rate  motor_no  motor_2rentai_rate  boat_no  boat_2rentai_rate
+0         24  260528        1    一般        1800      1   4941  孫崎百世   37     滋賀      47    B1               4.91                  27.45            5.19               33.33        20                 0.0       34                0.0
+1         24  260528        1    一般        1800      2   3871  池田紫乃   50     長崎      44    B1               4.18                  22.54            4.89               34.34        58                 0.0       48                0.0
+2         24  260528        1    一般        1800      3   5277  井上未都   24     福岡      46    B1               5.24                  28.07            4.26               17.39        24                 0.0       20                0.0
+3         24  260528        1    一般        1800      4   5003  来田衣織   30     兵庫      46    B1               4.72                  31.78            3.58               12.50        32                 0.0       24                0.0
+4         24  260528        1    一般        1800      5   4499  滝川真由   38     長崎      46    B1               5.14                  34.21            6.07               45.54        41                 0.0       40                0.0
+5         24  260528        1    一般        1800      6   5361  植竹玲奈   19     東京      50    B2               2.50                   4.05            2.57                0.00        18                 0.0       54                0.0

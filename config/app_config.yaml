@@ -1,0 +1,26 @@
+# boatrace-app 設定ファイル
+# 指標計算やスコアリングの挙動を変えるパラメータをここに集約する。
+# アプリ本体（表示層）はここを参照して挙動を切り替える想定。
+
+aggregation:
+  # 補正（出走数が少ない組み合わせを全体傾向に寄せる）の強さ。
+  # adjusted = (n * raw + shrinkage_k * baseline) / (n + shrinkage_k)
+  # 値が大きいほど「全体傾向寄り」になる。補正前の生の値は常に別カラムで保持する。
+  shrinkage_k: 10
+
+  # 例外（F・L・欠場・転覆など）をどう扱うかのデフォルト表示設定。
+  # 事前集計テーブル自体は常に exception を除いた値と例外込みの出走数を
+  # 両方カラムとして保持するので、ここはアプリ側の「デフォルト表示」の
+  # 初期値としてのみ使う（除外/含むはUIでいつでも切替可能な設計）。
+  default_exception_mode: exclude_from_average  # or: count_as_last_place
+
+  # 移動平均（時系列傾向グラフ）のウィンドウ
+  rolling_starts_window: 50
+  rolling_months_window: 6
+
+# 将来、着順点・レース種別ごとの点数による独自スコアリングを追加する場合の
+# 置き場所（初期実装では未使用）。
+point_table:
+  enabled: false
+  by_finish: null   # 例: {1: 10, 2: 8, 3: 6, 4: 4, 5: 2, 6: 1}
+  by_grade: null    # 例: {SG: 2.0, G1: 1.5, G2: 1.2, G3: 1.0, 一般: 1.0}

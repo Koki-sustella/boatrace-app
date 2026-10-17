@@ -1,0 +1,42 @@
+# Phase 2 本取り込み 検証レポート
+
+K-fileファイル数: 730
+B-fileファイル数: 730
+races: 111078 行
+entries (K-file出走結果): 666468 行
+program_entries (B-file番組表): 670896 行
+
+## データ品質チェック1: 1レースあたり出走数が6でない行があるか
+異常レース数: 0
+
+## データ品質チェック2: ダウンロードmanifestのステータス内訳
+kind  status     
+b     ok             726
+      skip_exists      4
+k     ok             718
+      skip_exists     12
+
+## データ品質チェック3: not_found/errorだった日付一覧（レース開催なし or 取得失敗）
+件数: 0
+Empty DataFrame
+Columns: [date, kind, status]
+Index: []
+
+## データ品質チェック4: 日付カバレッジ（racesテーブルに存在する日付数）
+   distinct_dates min(date) max(date)
+0             730    241017    261016
+
+## 例外着順コードの全期間集計
+  exception_label     n
+0          失格(責任)  2697
+1           フライング  2524
+2         失格(責任外)  2280
+3         欠場(責任外)   965
+4            妨害失格   532
+5          欠場(責任)   298
+6        出遅れ(責任外)    42
+7         出遅れ(責任)    22
+8          レース不成立    15
+
+## グレード未付与の確認（races.titleにSG/G1/G2/G3の文字列が無いこと）
+グレード文字列を含むtitle行数: 0 (0であることを期待)

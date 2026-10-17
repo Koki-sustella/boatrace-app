@@ -1,0 +1,19 @@
+# Everything under data/ is either re-fetchable raw cache or derived output
+# (DuckDB, grade_master.*). The working DuckDB is persisted on the data-state
+# branch by CI instead, not on main.
+data/
+
+# Exported site data is built fresh each run / deployed via Pages, not committed to main.
+site/data/
+
+# Python
+__pycache__/
+*.pyc
+
+# Misc debug output from development
+docs/*_output.txt
+docs/*_run.txt
+docs/venue*_raw.txt
+docs/check_*.txt
+docs/name_change_example.txt
+docs/layout_inspection.txt
