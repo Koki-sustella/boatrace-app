@@ -141,6 +141,26 @@ K-file/B-fileにはグレードを示すフィールドが存在しない（レ�
   （次回公開は例年10月末〜11月頃の見込み）。日次更新運用（フェーズ4）で公開され次第
   追従する
 
+## フェーズ4: Parquet書き出しと日次更新の結果
+
+- リポジトリ: https://github.com/Koki-sustella/boatrace-app (public)
+- 公開サイト: https://koki-sustella.github.io/boatrace-app/ （GitHub Pages、build_type=workflow）
+- `main`ブランチ: コード一式。`data-state`ブランチ: 日次更新の状態を保持する
+  `boatrace.duckdb`（CI間で永続化する唯一の手段。data/raw以下はCIでは永続化しない）
+- `.github/workflows/daily_update.yml`: 毎日19:30 UTC（日本時間4:30）に自動実行。
+  前日分のK-file/B-fileを差分取得→パース→追記、グレードスケジュールを当月・翌月分
+  再取得、新しい期別成績ファイルが公開されていれば取り込み、集計テーブルを再構築、
+  Parquetを書き出してGitHub Pagesにデプロイ、最後に`boatrace.duckdb`を`data-state`
+  ブランチへコミットし直す
+- CI環境では`data/raw`が永続化されないため、初回の自動実行で2つ不具合を発見・修正:
+  1. `grade_master`テーブルをファイルから毎回作り直そうとしてcrash → テーブルが
+     既にあればスキップするよう修正
+  2. 新しい期別成績ファイルが見つかった際、ディスク上の過去ファイルが無いため
+     racer_historyが新しい期のデータだけで上書きされてしまう問題 → 既存の
+     `racer_period_stats`テーブルに新しい期だけをマージする方式に変更
+     （ロールバック→再マージで行数が完全一致することをテストで確認済み）
+- 書き出しParquet合計: 約21.5MB（指示書の「数十MB」の見込み通り）
+
 ## 環境構築メモ
 
 - Python 3.12 を winget で導入済み（`C:\Users\kouki\AppData\Local\Programs\Python\Python312`,
