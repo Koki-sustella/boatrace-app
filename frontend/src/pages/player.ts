@@ -197,8 +197,44 @@ async function renderGridTab(el: HTMLElement, torokuNo: string) {
     byVenue.get(c.venue_code)!.push(c);
   }
   const venues = Array.from(byVenue.keys()).sort();
+
+  // 全場合計: same 6-course row, but summed/weighted-averaged across every
+  // venue the racer has raced at, so the course tendency is visible at a
+  // glance before scrolling through each venue individually.
+  const totalsByCourse = new Map<number, { starts: number; sumFinish: number; wins: number; place2: number; place3: number }>();
+  for (const c of cells) {
+    // starts_valid/starts_exception come from COUNT(*) in SQL (BIGINT), which
+    // duckdb-wasm surfaces as JS BigInt -- unlike the DOUBLE columns (avg_finish
+    // etc). Mixing BigInt into arithmetic with regular numbers throws, so
+    // convert explicitly before using it as a weight.
+    const starts = Number(c.starts_valid);
+    if (!starts) continue;
+    const t = totalsByCourse.get(c.entry_course) ?? { starts: 0, sumFinish: 0, wins: 0, place2: 0, place3: 0 };
+    t.starts += starts;
+    t.sumFinish += (c.avg_finish_raw ?? 0) * starts;
+    t.wins += (c.win_rate ?? 0) * starts;
+    t.place2 += (c.place2_rate ?? 0) * starts;
+    t.place3 += (c.place3_rate ?? 0) * starts;
+    totalsByCourse.set(c.entry_course, t);
+  }
+  const totalsCellsHtml = [1, 2, 3, 4, 5, 6]
+    .map((course) => {
+      const t = totalsByCourse.get(course);
+      if (!t || t.starts === 0) return `<div class="grid-cell empty">${course}</div>`;
+      const avgFinish = t.sumFinish / t.starts;
+      const color = colorForFinish(avgFinish);
+      return `<div class="grid-cell" data-course="${course}" style="background:${color}">
+        ${avgFinish.toFixed(1)}<span class="n">${course}C / ${t.starts}走</span>
+      </div>`;
+    })
+    .join("");
+
   el.innerHTML = `
     <p style="font-size:12px;color:var(--text-dim);">色が濃いほど平均着順が良い（緑=好成績、赤=苦手）。タップで出走履歴へ。数字はコース番号。</p>
+    <div class="card">
+      <div style="font-size:13px;margin-bottom:6px;font-weight:600;">全場合計</div>
+      <div class="grid-course">${totalsCellsHtml}</div>
+    </div>
     ${venues
       .map((v) => {
         const rows = byVenue.get(v)!;
@@ -219,6 +255,12 @@ async function renderGridTab(el: HTMLElement, torokuNo: string) {
   el.querySelectorAll<HTMLElement>("[data-venue]").forEach((cell) => {
     cell.addEventListener("click", () => {
       navigate(`/player/${torokuNo}/history?venue=${cell.dataset.venue}&course=${cell.dataset.course}`);
+    });
+  });
+  // Total row cells have no venue -- clicking filters history by course only.
+  el.querySelectorAll<HTMLElement>(".grid-cell[data-course]:not([data-venue])").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      navigate(`/player/${torokuNo}/history?course=${cell.dataset.course}`);
     });
   });
 }
