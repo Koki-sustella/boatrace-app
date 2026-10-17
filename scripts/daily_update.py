@@ -129,9 +129,21 @@ def refresh_grade_schedule(con):
     con.execute("INSERT INTO grade_master SELECT * FROM new_grades")
 
 
+def _fan_filename_period(fn: str) -> tuple[int, int]:
+    """fan{YY}04 -> (year=20YY, period=2); fan{YY}10 -> (year=20YY+1, period=1).
+    Confirmed against real parsed data (see docs/confirmed_layout.md)."""
+    yy = int(fn[3:5])
+    suffix = fn[5:7]
+    if suffix == "04":
+        return 2000 + yy, 2
+    return 2000 + yy + 1, 1
+
+
 def maybe_refresh_racer_history(con):
-    """Check for a newly-published 期別成績(fan) period file and, if found,
-    re-derive racers/racer_history/racer_period_stats from all fan files on disk."""
+    """Check (against the DB, not local files -- CI doesn't persist data/raw/
+    between runs) for a newly-published 期別成績(fan) period file. If found,
+    merge its records into racer_period_stats/racers and recompute racer_history
+    (name/class/branch change points) from the combined table."""
     kibetsu_dir = RAW_DIR / "kibetsu"
     kibetsu_dir.mkdir(parents=True, exist_ok=True)
     today = date.today()
@@ -142,10 +154,14 @@ def maybe_refresh_racer_history(con):
         candidates.add(f"fan{yy:02d}04.lzh")
         candidates.add(f"fan{yy:02d}10.lzh")
 
-    existing = {p.name for p in kibetsu_dir.glob("fan*.lzh")}
+    known_periods = {
+        (int(row[0]), int(row[1]))
+        for row in con.execute("SELECT DISTINCT year, period FROM racer_period_stats").fetchall()
+    }
+
     new_found = False
     for fn in sorted(candidates):
-        if fn in existing:
+        if _fan_filename_period(fn) in known_periods:
             continue
         url = f"https://www.boatrace.jp/static_extra/pc_static/download/data/kibetsu/{fn}"
         content = fetch_lzh(url)
@@ -162,31 +178,53 @@ def maybe_refresh_racer_history(con):
     if not new_found:
         return
 
-    all_records = []
+    # Only the newly-downloaded file(s) are on disk in CI (old raw fan files
+    # aren't persisted between runs) -- so parse just those, and merge with the
+    # existing racer_period_stats table rather than requiring the full history
+    # on disk. racer_history (change-detection) is then recomputed from the
+    # combined (old + new) table, not from raw files.
+    new_records = []
     for p in sorted(kibetsu_dir.glob("fan*.txt")):
+        y, per = _fan_filename_period(p.stem + ".lzh")
+        if (y, per) in known_periods:
+            continue  # an old file that happened to already exist locally
         records, _errors = parse_fan_file(p.read_bytes())
-        all_records.append(records)
-    all_records.sort(key=lambda recs: (recs[0].year, recs[0].period))
+        new_records += records
 
-    racers, history_rows = {}, []
-    for records in all_records:
-        for r in records:
-            racers.setdefault(r.toroku_no, {})
-            racers[r.toroku_no].update({
-                "toroku_no": r.toroku_no, "birth_date": r.birth_date, "sex": r.sex,
-                "training_period": r.training_period, "hometown": r.hometown,
-            })
-            history_rows.append({
-                "toroku_no": r.toroku_no, "year": r.year, "period": r.period,
-                "name_kanji": r.name_kanji, "name_kana": r.name_kana,
-                "branch": r.branch, "klass": r.klass,
-                "calc_from": r.calc_from, "calc_to": r.calc_to,
-                "win_rate": r.win_rate, "place_rate": r.place_rate,
-                "avg_st": r.avg_st, "starts": r.starts,
-            })
+    racers_updates, new_history_rows = {}, []
+    for r in new_records:
+        racers_updates[r.toroku_no] = {
+            "toroku_no": r.toroku_no, "birth_date": r.birth_date, "sex": r.sex,
+            "training_period": r.training_period, "hometown": r.hometown,
+        }
+        new_history_rows.append({
+            "toroku_no": r.toroku_no, "year": r.year, "period": r.period,
+            "name_kanji": r.name_kanji, "name_kana": r.name_kana,
+            "branch": r.branch, "klass": r.klass,
+            "calc_from": r.calc_from, "calc_to": r.calc_to,
+            "win_rate": r.win_rate, "place_rate": r.place_rate,
+            "avg_st": r.avg_st, "starts": r.starts,
+        })
 
-    racers_df = pd.DataFrame(list(racers.values()))
-    history_df = pd.DataFrame(history_rows).sort_values(["toroku_no", "year", "period"])
+    if not new_history_rows:
+        return
+
+    new_history_df = pd.DataFrame(new_history_rows)
+    con.register("new_period_rows", new_history_df)
+    con.execute("INSERT INTO racer_period_stats SELECT * FROM new_period_rows")
+
+    new_racers_df = pd.DataFrame(list(racers_updates.values()))
+    con.register("new_racers_rows", new_racers_df)
+    con.execute("""
+        DELETE FROM racers WHERE toroku_no IN (SELECT toroku_no FROM new_racers_rows)
+    """)
+    con.execute("INSERT INTO racers SELECT * FROM new_racers_rows")
+
+    # Recompute racer_history (name/class/branch change points) from the full,
+    # now-updated racer_period_stats table.
+    history_df = con.execute(
+        "SELECT * FROM racer_period_stats ORDER BY toroku_no, year, period"
+    ).df()
     changed_rows = []
     for _, g in history_df.groupby("toroku_no", sort=False):
         prev = None
@@ -196,12 +234,7 @@ def maybe_refresh_racer_history(con):
                 changed_rows.append(row)
             prev = key
     racer_history_df = pd.DataFrame(changed_rows)
-
-    con.register("racers_df2", racers_df)
-    con.register("history_df2", history_df)
     con.register("racer_history_df2", racer_history_df)
-    con.execute("CREATE OR REPLACE TABLE racers AS SELECT * FROM racers_df2")
-    con.execute("CREATE OR REPLACE TABLE racer_period_stats AS SELECT * FROM history_df2")
     con.execute("CREATE OR REPLACE TABLE racer_history AS SELECT * FROM racer_history_df2")
 
 

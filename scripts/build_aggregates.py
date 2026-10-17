@@ -36,9 +36,16 @@ def main():
 
     con = duckdb.connect(str(DB_PATH))
 
-    # --- 0. grade master + races_with_grade -------------------------------
-    grade_parquet = ROOT / "data" / "grade_master.parquet"
-    con.execute(f"CREATE OR REPLACE TABLE grade_master AS SELECT * FROM read_parquet('{grade_parquet.as_posix()}')")
+    # --- 0. grade_master is the DB table itself (source of truth); only seed it
+    # from the one-time full scrape's parquet if the table doesn't exist yet.
+    # Afterwards it's maintained incrementally by daily_update.py's upsert, and
+    # this function must NOT clobber it from a (possibly stale/missing) file.
+    has_grade_table = con.execute("""
+        SELECT count(*) FROM information_schema.tables WHERE table_name = 'grade_master'
+    """).fetchone()[0] > 0
+    if not has_grade_table:
+        grade_parquet = ROOT / "data" / "grade_master.parquet"
+        con.execute(f"CREATE TABLE grade_master AS SELECT * FROM read_parquet('{grade_parquet.as_posix()}')")
     con.execute("""
         CREATE OR REPLACE VIEW races_with_grade AS
         SELECT r.*, COALESCE(g.grade, '一般') AS grade
