@@ -32,6 +32,14 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Activate a newly-installed service worker immediately instead of the
+        // browser's default "wait until every open tab/PWA instance of the old
+        // version is closed" behavior. Without this, a user who keeps the PWA
+        // open (or revisits via a home-screen icon, which doesn't do a normal
+        // reload) can be stuck on a stale cached build indefinitely even after
+        // a new version is deployed and even after they manually reload.
+        skipWaiting: true,
+        clientsClaim: true,
         // App shell: precache + cache-first via workbox default (handled by globPatterns).
         // DuckDB-WASM's .wasm binaries (~35-40MB each, mvp vs eh picked at runtime
         // depending on browser support -- only one is ever actually used) are
