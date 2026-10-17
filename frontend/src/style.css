@@ -204,7 +204,7 @@ button.primary { background: var(--accent); color: #04121f; border: none; font-w
   color: var(--text-dim);
 }
 
-.profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; }
+.profile-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; font-size: 13px; }
 .profile-grid dt { color: var(--text-dim); }
 .profile-grid dd { margin: 0 0 8px; }
 
@@ -220,7 +220,10 @@ th { color: var(--text-dim); font-weight: 500; position: sticky; top: 0; backgro
 
 .grid-course {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  /* minmax(0, 1fr), not bare 1fr: a bare 1fr track's automatic minimum size is
+     the content's min-content width, so a sparsely-filled cell (just "4") and
+     a stats cell (e.g. "4C / 2走") end up with different column widths. */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 4px;
 }
 .grid-cell {
