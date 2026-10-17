@@ -95,7 +95,7 @@ a { color: var(--accent); text-decoration: none; }
 .nav-bar .icon { display: block; font-size: 18px; margin-bottom: 2px; }
 
 /* ---- Desktop/tablet: left sidebar nav, wide centered content column ---- */
-@media (min-width: 860px) {
+@media (min-width: 700px) {
   .app-shell {
     max-width: none;
     display: flex;
