@@ -1,6 +1,12 @@
-duckdb
-requests
-lhafile
-pandas
-pyarrow
-pyyaml
+# Pinned (not just duckdb): an unpinned dependency silently auto-upgrading in
+# CI broke the daily pipeline for 3 days straight (duckdb 1.5.x -> 2.0.0
+# changed connection/result-cursor semantics: a plain .fetchone() no longer
+# marks a result as finished, so a later con.register()/execute() on the same
+# connection throws ResourceInUseException). Pin everything to the versions
+# that were actually tested, and bump deliberately.
+duckdb==1.5.6
+requests==2.34.2
+lhafile==0.3.1
+pandas==3.0.6
+pyarrow==26.0.0
+pyyaml==6.0.3
