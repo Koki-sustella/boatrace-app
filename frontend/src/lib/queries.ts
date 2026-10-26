@@ -525,3 +525,23 @@ export async function getAllVenueCourseWinRates(): Promise<VenueCourseWinRateRow
     ORDER BY venue_code, entry_course
   `);
 }
+
+export interface CourseAptitudeRow {
+  avg_point: number | null; // finish-quality point: 1st=6 .. 6th=1, exception=0
+  starts: number;
+}
+
+/** All-time (all venues) course aptitude: average finish-quality point for
+ * this racer when starting from `course`, across every start on record
+ * (not just the recent ones) -- a larger-sample, long-run baseline. */
+export async function getRacerCourseAptitude(torokuNo: string, course: number): Promise<CourseAptitudeRow> {
+  const rows = await query<CourseAptitudeRow>(`
+    SELECT
+      avg(CASE WHEN is_exception OR TRY_CAST(finish AS INTEGER) IS NULL THEN 0
+                ELSE 7 - TRY_CAST(finish AS INTEGER) END) AS avg_point,
+      count(*) AS starts
+    FROM entries_enriched
+    WHERE reg_no = '${escapeSqlString(torokuNo)}' AND entry_course = ${course}
+  `);
+  return rows[0] ?? { avg_point: null, starts: 0 };
+}

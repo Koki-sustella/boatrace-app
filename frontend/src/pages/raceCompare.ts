@@ -2,9 +2,10 @@ import { renderShell, loading } from "../components/shell";
 import { navigate } from "../lib/router";
 import { venueName, formatDate } from "../lib/constants";
 import {
-  getRacerProfile, getRecentStarts, getRacerCourseAvgST,
-  type RacerProfile, type RecentStartRow, type CourseAvgSTRow,
+  getRacerProfile, getRecentStarts, getRacerCourseAvgST, getRacerCourseAptitude,
+  type RacerProfile, type RecentStartRow, type CourseAvgSTRow, type CourseAptitudeRow,
 } from "../lib/queries";
+import { predictTrifecta, scoreBreakdown, type BoatInput } from "../lib/trifectaPredict";
 
 const SLOTS = [1, 2, 3, 4, 5, 6];
 
@@ -13,7 +14,7 @@ export async function renderRaceComparePage() {
   content.innerHTML = `
     <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">
       1〜6号艇の登録番号を入力すると、各艇の枠番コースでの平均STを一覧比較し、
-      その号艇のコースに限定した直近10走を表示します。
+      その号艇のコースに限定した直近10走・3連単の買い目候補を表示します。
     </p>
     <div id="slot-inputs"></div>
     <button class="primary" id="go" style="width:100%;margin:8px 0 16px;">表示</button>
@@ -56,12 +57,13 @@ export async function renderRaceComparePage() {
     loading(resultsEl);
     const results = await Promise.all(
       slotIds.map(async ({ slot, torokuNo }) => {
-        const [profile, avgSt, recent] = await Promise.all([
+        const [profile, avgSt, recent, aptitude] = await Promise.all([
           getRacerProfile(torokuNo),
           getRacerCourseAvgST(torokuNo, slot),
           getRecentStarts(torokuNo, 10, slot),
+          getRacerCourseAptitude(torokuNo, slot),
         ]);
-        return { slot, torokuNo, profile, avgSt, recent };
+        return { slot, torokuNo, profile, avgSt, recent, aptitude };
       })
     );
     renderResults(resultsEl, results);
@@ -76,9 +78,11 @@ interface SlotResult {
   profile: RacerProfile | null;
   avgSt: CourseAvgSTRow;
   recent: RecentStartRow[];
+  aptitude: CourseAptitudeRow;
 }
 
 function renderResults(el: HTMLElement, results: SlotResult[]) {
+  const validResults = results.filter((r) => r.profile);
   el.innerHTML = `
     <div class="card">
       <div style="font-size:13px;margin-bottom:6px;font-weight:600;">コース別平均ST比較</div>
@@ -86,6 +90,7 @@ function renderResults(el: HTMLElement, results: SlotResult[]) {
       <div style="font-size:13px;margin:14px 0 6px;font-weight:600;">直近10走の1着回数比較</div>
       ${renderWinCountComparisonTable(results)}
     </div>
+    ${renderTrifectaCard(validResults)}
     <div class="compare-grid">
       ${results.map(renderSlotCard).join("")}
     </div>
@@ -93,6 +98,77 @@ function renderResults(el: HTMLElement, results: SlotResult[]) {
   el.querySelectorAll<HTMLElement>("[data-goto]").forEach((link) => {
     link.addEventListener("click", () => navigate(`/player/${link.dataset.goto}`));
   });
+}
+
+function renderTrifectaCard(results: SlotResult[]): string {
+  if (results.length < 3) {
+    return `
+      <div class="card">
+        <div style="font-size:13px;margin-bottom:6px;font-weight:600;">3連単 買い目候補</div>
+        <div class="empty">3艇以上入力すると買い目候補を表示します</div>
+      </div>
+    `;
+  }
+
+  const boats: BoatInput[] = results.map((r) => ({
+    frame: r.slot,
+    recent: r.recent,
+    avgSt: r.avgSt,
+    aptitude: r.aptitude,
+  }));
+  const picks = predictTrifecta(boats, 12);
+  const breakdown = scoreBreakdown(boats);
+  const nameByFrame = new Map(results.map((r) => [r.slot, r.profile!.name_kanji]));
+
+  const picksRows = picks
+    .map(
+      ({ combo, probability }, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td style="font-weight:600;">${combo.join("-")}</td>
+        <td style="text-align:left;">${combo.map((f) => nameByFrame.get(f)).join(" / ")}</td>
+        <td>${(probability * 100).toFixed(2)}%</td>
+      </tr>`
+    )
+    .join("");
+
+  const breakdownRows = breakdown
+    .map(
+      (b) => `
+      <tr>
+        <td><span class="badge">${b.frame}号艇</span></td>
+        <td>${b.rf.toFixed(2)}</td>
+        <td>${b.st != null ? b.st.toFixed(2) : "-"}</td>
+        <td>${b.ca.toFixed(2)}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `
+    <div class="card">
+      <div style="font-size:13px;margin-bottom:4px;font-weight:600;">3連単 買い目候補（上位${picks.length}点）</div>
+      <p style="font-size:11px;color:var(--text-dim);margin:0 0 10px;">
+        優先度: 直近10走(G1・SG重み2倍) &gt; 平均ST &gt; コース適性(全場・全期間)。
+        統計的傾向に基づく参考情報であり、的中を保証するものではありません。
+        枠番＝進入コースと仮定して算出しています。
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>順位</th><th>3連単</th><th style="text-align:left;">選手</th><th>推定確率</th></tr></thead>
+          <tbody>${picksRows}</tbody>
+        </table>
+      </div>
+      <details style="margin-top:10px;font-size:12px;">
+        <summary style="cursor:pointer;color:var(--text-dim);">各艇のスコア内訳を見る</summary>
+        <div class="table-scroll" style="margin-top:8px;">
+          <table>
+            <thead><tr><th>枠</th><th>直近10走★点</th><th>平均ST</th><th>コース適性★点</th></tr></thead>
+            <tbody>${breakdownRows}</tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  `;
 }
 
 function winCountInRecent(r: SlotResult): number {
