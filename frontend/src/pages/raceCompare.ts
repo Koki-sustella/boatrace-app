@@ -100,7 +100,7 @@ function winCountInRecent(r: SlotResult): number {
 }
 
 function renderWinCountComparisonTable(results: SlotResult[]): string {
-  const sorted = [...results].sort((a, b) => winCountInRecent(b) - winCountInRecent(a));
+  const sorted = [...results].sort((a, b) => a.slot - b.slot);
   const rows = sorted
     .map((r) => {
       const name = r.profile ? r.profile.name_kanji : `(${r.torokuNo})`;
@@ -123,12 +123,7 @@ function renderWinCountComparisonTable(results: SlotResult[]): string {
 }
 
 function renderStComparisonTable(results: SlotResult[]): string {
-  // Fastest (lowest) average ST first; entries with no data sort last.
-  const sorted = [...results].sort((a, b) => {
-    const av = a.avgSt.starts > 0 ? a.avgSt.avg_st! : Infinity;
-    const bv = b.avgSt.starts > 0 ? b.avgSt.avg_st! : Infinity;
-    return av - bv;
-  });
+  const sorted = [...results].sort((a, b) => a.slot - b.slot);
   const rows = sorted
     .map((r) => {
       const name = r.profile ? r.profile.name_kanji : `(${r.torokuNo})`;
