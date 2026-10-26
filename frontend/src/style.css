@@ -155,6 +155,12 @@ a { color: var(--accent); text-decoration: none; }
   /* Course grid and search-result rows get cramped if stretched edge-to-edge
      on a wide column -- cap the cell size instead of letting it balloon. */
   .grid-course { max-width: 420px; }
+
+  /* 6-boat compare page: use the wider column for a 2-up card layout instead
+     of one long single-column stack. */
+  .content:has(.compare-grid) { max-width: 980px; }
+  .compare-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .compare-grid .card { margin-bottom: 0; }
 }
 
 input, select, button {
@@ -239,6 +245,20 @@ th { color: var(--text-dim); font-weight: 500; position: sticky; top: 0; backgro
 }
 .grid-cell .n { font-size: 9px; opacity: 0.75; }
 .grid-cell.empty { background: var(--surface-2); color: var(--text-dim); }
+
+.slot-input-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.slot-input-grid .field { margin-bottom: 0; }
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+.compare-grid .card { margin-bottom: 12px; }
 
 .tabs { display: flex; gap: 4px; margin-bottom: 12px; overflow-x: auto; }
 .tabs button { background: var(--surface-2); border: 1px solid var(--border); white-space: nowrap; font-size: 12px; padding: 8px 12px; }

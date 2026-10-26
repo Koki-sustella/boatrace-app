@@ -471,3 +471,39 @@ export async function getUpcomingRaces(torokuNo: string, fromDate: string): Prom
     LIMIT 50
   `);
 }
+
+export interface RecentStartRow {
+  date: string;
+  venue_code: string;
+  race_no: number;
+  entry_course: number | null;
+  finish: string | null;
+  exception_label: string | null;
+  start_timing: number | null;
+  race_time_sec: number | null;
+  grade: string;
+}
+
+export async function getRecentStarts(torokuNo: string, limit = 10): Promise<RecentStartRow[]> {
+  return query<RecentStartRow>(`
+    SELECT date, venue_code, race_no, entry_course, finish, exception_label, start_timing, race_time_sec, grade
+    FROM entries_enriched
+    WHERE reg_no = '${escapeSqlString(torokuNo)}'
+    ORDER BY date DESC, race_no DESC
+    LIMIT ${limit}
+  `);
+}
+
+export interface CourseAvgSTRow {
+  avg_st: number | null;
+  starts: number;
+}
+
+export async function getRacerCourseAvgST(torokuNo: string, course: number): Promise<CourseAvgSTRow> {
+  const rows = await query<CourseAvgSTRow>(`
+    SELECT avg(start_timing) AS avg_st, count(start_timing) AS starts
+    FROM entries_enriched
+    WHERE reg_no = '${escapeSqlString(torokuNo)}' AND entry_course = ${course}
+  `);
+  return rows[0] ?? { avg_st: null, starts: 0 };
+}
