@@ -484,11 +484,12 @@ export interface RecentStartRow {
   grade: string;
 }
 
-export async function getRecentStarts(torokuNo: string, limit = 10): Promise<RecentStartRow[]> {
+export async function getRecentStarts(torokuNo: string, limit = 10, course?: number): Promise<RecentStartRow[]> {
+  const courseCond = course != null ? `AND entry_course = ${course}` : "";
   return query<RecentStartRow>(`
     SELECT date, venue_code, race_no, entry_course, finish, exception_label, start_timing, race_time_sec, grade
     FROM entries_enriched
-    WHERE reg_no = '${escapeSqlString(torokuNo)}'
+    WHERE reg_no = '${escapeSqlString(torokuNo)}' ${courseCond}
     ORDER BY date DESC, race_no DESC
     LIMIT ${limit}
   `);

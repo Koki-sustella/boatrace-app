@@ -12,7 +12,8 @@ export async function renderRaceComparePage() {
   const content = renderShell({ title: "直前比較", activeNav: "race-compare" });
   content.innerHTML = `
     <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">
-      1〜6号艇の登録番号を入力すると、各艇の枠番コースでの平均ST・直近10走をまとめて表示します。
+      1〜6号艇の登録番号を入力すると、各艇の枠番コースでの平均STを一覧比較し、
+      その号艇のコースに限定した直近10走を表示します。
     </p>
     <div id="slot-inputs"></div>
     <button class="primary" id="go" style="width:100%;margin:8px 0 16px;">表示</button>
@@ -58,7 +59,7 @@ export async function renderRaceComparePage() {
         const [profile, avgSt, recent] = await Promise.all([
           getRacerProfile(torokuNo),
           getRacerCourseAvgST(torokuNo, slot),
-          getRecentStarts(torokuNo, 10),
+          getRecentStarts(torokuNo, 10, slot),
         ]);
         return { slot, torokuNo, profile, avgSt, recent };
       })
@@ -79,6 +80,10 @@ interface SlotResult {
 
 function renderResults(el: HTMLElement, results: SlotResult[]) {
   el.innerHTML = `
+    <div class="card">
+      <div style="font-size:13px;margin-bottom:6px;font-weight:600;">コース別平均ST比較</div>
+      ${renderStComparisonTable(results)}
+    </div>
     <div class="compare-grid">
       ${results.map(renderSlotCard).join("")}
     </div>
@@ -88,12 +93,41 @@ function renderResults(el: HTMLElement, results: SlotResult[]) {
   });
 }
 
+function renderStComparisonTable(results: SlotResult[]): string {
+  // Fastest (lowest) average ST first; entries with no data sort last.
+  const sorted = [...results].sort((a, b) => {
+    const av = a.avgSt.starts > 0 ? a.avgSt.avg_st! : Infinity;
+    const bv = b.avgSt.starts > 0 ? b.avgSt.avg_st! : Infinity;
+    return av - bv;
+  });
+  const rows = sorted
+    .map((r) => {
+      const name = r.profile ? r.profile.name_kanji : `(${r.torokuNo})`;
+      const stText = r.avgSt.starts > 0 ? r.avgSt.avg_st!.toFixed(2) : "-";
+      const startsText = r.avgSt.starts > 0 ? `${r.avgSt.starts}走` : "データなし";
+      return `<tr>
+        <td><span class="badge">${r.slot}号艇</span></td>
+        <td style="text-align:left;">${name}</td>
+        <td><strong>${stText}</strong></td>
+        <td>${startsText}</td>
+      </tr>`;
+    })
+    .join("");
+  return `
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>枠</th><th style="text-align:left;">選手</th><th>平均ST</th><th>出走数</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 function renderSlotCard(r: SlotResult): string {
   if (!r.profile) {
     return `<div class="card"><div class="badge">${r.slot}号艇</div><div class="empty">登録番号 ${r.torokuNo} の選手が見つかりません</div></div>`;
   }
   const p = r.profile;
-  const stText = r.avgSt.starts > 0 ? `${r.avgSt.avg_st!.toFixed(2)}（${r.avgSt.starts}走）` : "データなし";
 
   const rows = r.recent
     .map((row) => {
@@ -101,7 +135,7 @@ function renderSlotCard(r: SlotResult): string {
       return `<tr>
         <td>${formatDate(row.date)}</td>
         <td>${venueName(row.venue_code)}</td>
-        <td>${row.entry_course ?? "-"}</td>
+        <td>${row.race_no}R</td>
         <td>${finishDisplay}</td>
         <td>${row.start_timing != null ? row.start_timing.toFixed(2) : "-"}</td>
       </tr>`;
@@ -117,14 +151,11 @@ function renderSlotCard(r: SlotResult): string {
           <span class="badge">${p.klass}</span>
         </div>
       </div>
-      <div class="stat-row">
-        <span class="label">${r.slot}コース平均ST</span>
-        <span class="value">${stText}</span>
-      </div>
-      <div class="table-scroll" style="margin-top:8px;">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">${r.slot}コースでの直近10走</div>
+      <div class="table-scroll">
         <table>
-          <thead><tr><th>日付</th><th>場</th><th>進入</th><th>着</th><th>ST</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="5" class="empty">出走履歴がありません</td></tr>`}</tbody>
+          <thead><tr><th>日付</th><th>場</th><th>R</th><th>着</th><th>ST</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" class="empty">${r.slot}コースでの出走履歴がありません</td></tr>`}</tbody>
         </table>
       </div>
     </div>
