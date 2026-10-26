@@ -81,6 +81,11 @@ a { color: var(--accent); text-decoration: none; }
   border-top: 1px solid var(--border);
   display: flex;
   z-index: 10;
+  /* Pin this to its own compositing layer. Without it, iOS Safari can let a
+     fixed element scroll along with the page when the page has several
+     -webkit-overflow-scrolling:touch containers (race-compare, with its many
+     per-slot tables, is the page where this was reported). */
+  transform: translateZ(0);
 }
 
 .nav-bar a {
@@ -222,7 +227,7 @@ button.primary { background: var(--accent); color: #04121f; border: none; font-w
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td { padding: 6px 4px; text-align: center; border-bottom: 1px solid var(--border); }
 th { color: var(--text-dim); font-weight: 500; position: sticky; top: 0; background: var(--surface); }
-.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll { overflow-x: auto; }
 
 .grid-course {
   display: grid;
