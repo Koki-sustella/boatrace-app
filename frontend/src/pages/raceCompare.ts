@@ -148,7 +148,8 @@ function renderTrifectaCard(results: SlotResult[]): string {
     aptitude: r.aptitude,
     rating: r.rating,
   }));
-  const picks = predictTrifecta(boats, 12);
+  const isWomensRace = results.every((r) => r.profile!.sex === "女");
+  const picks = predictTrifecta(boats, 12, isWomensRace);
   const breakdown = scoreBreakdown(boats);
   const nameByFrame = new Map(results.map((r) => [r.slot, r.profile!.name_kanji]));
 
@@ -180,9 +181,10 @@ function renderTrifectaCard(results: SlotResult[]): string {
 
   return `
     <div class="card">
-      <div style="font-size:13px;margin-bottom:4px;font-weight:600;">3連単 買い目候補（上位${picks.length}点）</div>
+      <div style="font-size:13px;margin-bottom:4px;font-weight:600;">3連単 買い目候補（上位${picks.length}点）${isWomensRace ? '<span class="badge" style="margin-left:6px;">女子レース用の重み</span>' : ""}</div>
       <p style="font-size:11px;color:var(--text-dim);margin:0 0 10px;">
         考慮要素: コース適性(全場・全期間) / 全国・当地勝率 / 直近10走(G1・SG重み2倍) / 平均ST / 級別。
+        ${isWomensRace ? "出走6名が全員女性のため、女子レース専用の重み付けで算出しています。" : ""}
         統計的傾向に基づく参考情報であり、的中を保証するものではありません。
         枠番＝進入コースと仮定して算出しています。
       </p>

@@ -6,11 +6,15 @@
  */
 import type { RecentStartRow, CourseAvgSTRow, CourseAptitudeRow, RacerLatestRatingRow } from "./queries";
 
-const W_CA = 0.3;
-const W_RF = 0.2;
-const W_ST = 0.15;
-const W_WR = 0.3;
-const W_CL = 0.05;
+// Weight configs found via scripts/backtest_trifecta_sweep2.py (general) and
+// scripts/backtest_trifecta_women_sweep.py (女子レース, all 6 entrants
+// female -- course aptitude is more predictive there and average ST less so,
+// likely because women racers have far fewer starts per course to begin
+// with, making ST noisier).
+const WEIGHTS = {
+  default: { ca: 0.3, rf: 0.2, st: 0.15, wr: 0.3, cl: 0.05 },
+  women: { ca: 0.5, rf: 0.2, st: 0.1, wr: 0.15, cl: 0.05 },
+};
 const GRADE_WEIGHT = 2.0;
 const FALLBACK_POINT = 3.5;
 const FALLBACK_ST = 0.17;
@@ -73,7 +77,8 @@ export interface TrifectaPick {
   probability: number;
 }
 
-export function predictTrifecta(boats: BoatInput[], topN = 12): TrifectaPick[] {
+export function predictTrifecta(boats: BoatInput[], topN = 12, isWomensRace = false): TrifectaPick[] {
+  const w = isWomensRace ? WEIGHTS.women : WEIGHTS.default;
   const rf = boats.map((b) => recentFormScore(b.recent));
   const stRaw = boats.map((b) => (b.avgSt.starts > 0 ? -b.avgSt.avg_st! : -FALLBACK_ST));
   const ca = boats.map((b) => (b.aptitude.starts > 0 ? b.aptitude.avg_point! : FALLBACK_POINT));
@@ -88,7 +93,7 @@ export function predictTrifecta(boats: BoatInput[], topN = 12): TrifectaPick[] {
 
   const strength = new Map<number, number>();
   boats.forEach((b, i) => {
-    const composite = W_CA * caN[i] + W_RF * rfN[i] + W_ST * stN[i] + W_WR * wrN[i] + W_CL * clN[i];
+    const composite = w.ca * caN[i] + w.rf * rfN[i] + w.st * stN[i] + w.wr * wrN[i] + w.cl * clN[i];
     strength.set(b.frame, Math.exp(STRENGTH_SCALE * composite));
   });
 
