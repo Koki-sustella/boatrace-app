@@ -10,6 +10,7 @@ export function renderShell(opts: { title: string; back?: boolean; activeNav?: s
         <a href="#/venue-course" data-nav="venue-course"><span class="icon">📍</span>場×コース</a>
         <a href="#/ranking" data-nav="ranking"><span class="icon">📈</span>伸び率</a>
         <a href="#/race-compare" data-nav="race-compare"><span class="icon">🏁</span>直前比較</a>
+        <a href="#/venue-win-rate" data-nav="venue-win-rate"><span class="icon">🏆</span>場別勝率</a>
       </nav>
       <div class="app-col">
         <header class="header">

@@ -508,3 +508,20 @@ export async function getRacerCourseAvgST(torokuNo: string, course: number): Pro
   `);
   return rows[0] ?? { avg_st: null, starts: 0 };
 }
+
+export interface VenueCourseWinRateRow {
+  venue_code: string;
+  entry_course: number;
+  win_rate: number | null;
+  place2_rate: number | null;
+  place3_rate: number | null;
+  starts_valid: number;
+}
+
+export async function getAllVenueCourseWinRates(): Promise<VenueCourseWinRateRow[]> {
+  return query<VenueCourseWinRateRow>(`
+    SELECT venue_code, entry_course, win_rate, place2_rate, place3_rate, starts_valid
+    FROM agg_venue_course_overall
+    ORDER BY venue_code, entry_course
+  `);
+}

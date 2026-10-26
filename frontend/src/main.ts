@@ -25,6 +25,7 @@ import { renderHistoryPage } from "./pages/history";
 import { renderVenueCoursePage } from "./pages/venueCourse";
 import { renderRankingPage } from "./pages/ranking";
 import { renderRaceComparePage } from "./pages/raceCompare";
+import { renderVenueCourseWinRatePage } from "./pages/venueCourseWinRate";
 
 route("/", () => navigate("/search"));
 route("/search", renderSearchPage);
@@ -33,6 +34,7 @@ route("/player/:torokuNo/history", renderHistoryPage);
 route("/venue-course", renderVenueCoursePage);
 route("/ranking", renderRankingPage);
 route("/race-compare", renderRaceComparePage);
+route("/venue-win-rate", renderVenueCourseWinRatePage);
 
 setNotFound(() => navigate("/search"));
 

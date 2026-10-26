@@ -132,8 +132,9 @@ function renderSlotCard(r: SlotResult): string {
   const rows = r.recent
     .map((row) => {
       const finishDisplay = row.exception_label ?? row.finish ?? "-";
-      return `<tr>
-        <td>${formatDate(row.date)}</td>
+      const isTopGrade = row.grade === "SG" || row.grade === "G1";
+      return `<tr${isTopGrade ? ' style="color:var(--warn);"' : ""}>
+        <td>${isTopGrade ? "★ " : ""}${formatDate(row.date)}</td>
         <td>${venueName(row.venue_code)}</td>
         <td>${row.race_no}R</td>
         <td>${finishDisplay}</td>
@@ -151,7 +152,7 @@ function renderSlotCard(r: SlotResult): string {
           <span class="badge">${p.klass}</span>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">${r.slot}コースでの直近10走</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">${r.slot}コースでの直近10走（★=SG・G1）</div>
       <div class="table-scroll">
         <table>
           <thead><tr><th>日付</th><th>場</th><th>R</th><th>着</th><th>ST</th></tr></thead>
