@@ -545,3 +545,23 @@ export async function getRacerCourseAptitude(torokuNo: string, course: number): 
   `);
   return rows[0] ?? { avg_point: null, starts: 0 };
 }
+
+export interface RacerLatestRatingRow {
+  national_win_rate: number | null;
+  local_win_rate: number | null;
+  klass: string | null;
+}
+
+/** Most recently published national/local win rate and class for this racer,
+ * taken from the latest program_entries row on record (the official
+ * per-period rating the provider publishes ahead of each race). */
+export async function getRacerLatestRating(torokuNo: string): Promise<RacerLatestRatingRow> {
+  const rows = await query<RacerLatestRatingRow>(`
+    SELECT national_win_rate, local_win_rate, klass
+    FROM program_entries
+    WHERE reg_no = '${escapeSqlString(torokuNo)}'
+    ORDER BY date DESC
+    LIMIT 1
+  `);
+  return rows[0] ?? { national_win_rate: null, local_win_rate: null, klass: null };
+}

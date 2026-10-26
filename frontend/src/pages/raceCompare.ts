@@ -2,8 +2,8 @@ import { renderShell, loading } from "../components/shell";
 import { navigate } from "../lib/router";
 import { venueName, formatDate } from "../lib/constants";
 import {
-  getRacerProfile, getRecentStarts, getRacerCourseAvgST, getRacerCourseAptitude,
-  type RacerProfile, type RecentStartRow, type CourseAvgSTRow, type CourseAptitudeRow,
+  getRacerProfile, getRecentStarts, getRacerCourseAvgST, getRacerCourseAptitude, getRacerLatestRating,
+  type RacerProfile, type RecentStartRow, type CourseAvgSTRow, type CourseAptitudeRow, type RacerLatestRatingRow,
 } from "../lib/queries";
 import { predictTrifecta, scoreBreakdown, type BoatInput } from "../lib/trifectaPredict";
 
@@ -57,13 +57,14 @@ export async function renderRaceComparePage() {
     loading(resultsEl);
     const results = await Promise.all(
       slotIds.map(async ({ slot, torokuNo }) => {
-        const [profile, avgSt, recent, aptitude] = await Promise.all([
+        const [profile, avgSt, recent, aptitude, rating] = await Promise.all([
           getRacerProfile(torokuNo),
           getRacerCourseAvgST(torokuNo, slot),
           getRecentStarts(torokuNo, 10, slot),
           getRacerCourseAptitude(torokuNo, slot),
+          getRacerLatestRating(torokuNo),
         ]);
-        return { slot, torokuNo, profile, avgSt, recent, aptitude };
+        return { slot, torokuNo, profile, avgSt, recent, aptitude, rating };
       })
     );
     renderResults(resultsEl, results);
@@ -79,6 +80,7 @@ interface SlotResult {
   avgSt: CourseAvgSTRow;
   recent: RecentStartRow[];
   aptitude: CourseAptitudeRow;
+  rating: RacerLatestRatingRow;
 }
 
 function renderResults(el: HTMLElement, results: SlotResult[]) {
@@ -115,6 +117,7 @@ function renderTrifectaCard(results: SlotResult[]): string {
     recent: r.recent,
     avgSt: r.avgSt,
     aptitude: r.aptitude,
+    rating: r.rating,
   }));
   const picks = predictTrifecta(boats, 12);
   const breakdown = scoreBreakdown(boats);
@@ -137,9 +140,11 @@ function renderTrifectaCard(results: SlotResult[]): string {
       (b) => `
       <tr>
         <td><span class="badge">${b.frame}号艇</span></td>
+        <td>${b.ca.toFixed(2)}</td>
         <td>${b.rf.toFixed(2)}</td>
         <td>${b.st != null ? b.st.toFixed(2) : "-"}</td>
-        <td>${b.ca.toFixed(2)}</td>
+        <td>${b.wr != null ? b.wr.toFixed(2) : "-"}</td>
+        <td>${b.cl ?? "-"}</td>
       </tr>`
     )
     .join("");
@@ -148,7 +153,7 @@ function renderTrifectaCard(results: SlotResult[]): string {
     <div class="card">
       <div style="font-size:13px;margin-bottom:4px;font-weight:600;">3連単 買い目候補（上位${picks.length}点）</div>
       <p style="font-size:11px;color:var(--text-dim);margin:0 0 10px;">
-        優先度: 直近10走(G1・SG重み2倍) &gt; 平均ST &gt; コース適性(全場・全期間)。
+        考慮要素: コース適性(全場・全期間) / 全国・当地勝率 / 直近10走(G1・SG重み2倍) / 平均ST / 級別。
         統計的傾向に基づく参考情報であり、的中を保証するものではありません。
         枠番＝進入コースと仮定して算出しています。
       </p>
@@ -162,7 +167,7 @@ function renderTrifectaCard(results: SlotResult[]): string {
         <summary style="cursor:pointer;color:var(--text-dim);">各艇のスコア内訳を見る</summary>
         <div class="table-scroll" style="margin-top:8px;">
           <table>
-            <thead><tr><th>枠</th><th>直近10走★点</th><th>平均ST</th><th>コース適性★点</th></tr></thead>
+            <thead><tr><th>枠</th><th>コース適性★点</th><th>直近10走★点</th><th>平均ST</th><th>全国/当地勝率</th><th>級別</th></tr></thead>
             <tbody>${breakdownRows}</tbody>
           </table>
         </div>
