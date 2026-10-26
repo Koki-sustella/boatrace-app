@@ -9,6 +9,12 @@ import { predictTrifecta, scoreBreakdown, type BoatInput } from "../lib/trifecta
 
 const SLOTS = [1, 2, 3, 4, 5, 6];
 
+// Module-level (survives SPA navigation away from and back to this page,
+// since the module isn't re-evaluated -- only cleared by an explicit reset
+// or a full page reload).
+const lastSlotValues: Record<number, string> = {};
+let lastResults: SlotResult[] | null = null;
+
 export async function renderRaceComparePage() {
   const content = renderShell({ title: "直前比較", activeNav: "race-compare" });
   content.innerHTML = `
@@ -17,7 +23,10 @@ export async function renderRaceComparePage() {
       その号艇のコースに限定した直近10走・3連単の買い目候補を表示します。
     </p>
     <div id="slot-inputs"></div>
-    <button class="primary" id="go" style="width:100%;margin:8px 0 16px;">表示</button>
+    <div style="display:flex;gap:8px;margin:8px 0 16px;">
+      <button class="primary" id="go" style="flex:1;">表示</button>
+      <button id="reset" style="flex:0 0 auto;">リセット</button>
+    </div>
     <div id="results"></div>
   `;
 
@@ -28,20 +37,29 @@ export async function renderRaceComparePage() {
         (s) => `
         <div class="field">
           <label for="slot-${s}">${s}号艇</label>
-          <input id="slot-${s}" inputmode="numeric" placeholder="登録番号" />
+          <input id="slot-${s}" inputmode="numeric" placeholder="登録番号" value="${lastSlotValues[s] ?? ""}" />
         </div>`
       ).join("")}
     </div>
   `;
 
-  // Enter key on any slot input triggers the same lookup as the button.
-  inputsEl.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
+  const resultsEl = content.querySelector<HTMLElement>("#results")!;
+
+  // Enter key on any slot input triggers the same lookup as the button;
+  // any edit updates the persisted value so it survives tab switches.
+  inputsEl.querySelectorAll<HTMLInputElement>("input").forEach((input, i) => {
+    const slot = SLOTS[i];
+    input.addEventListener("input", () => {
+      lastSlotValues[slot] = input.value;
+    });
     input.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") run();
     });
   });
 
-  const resultsEl = content.querySelector<HTMLElement>("#results")!;
+  if (lastResults) {
+    renderResults(resultsEl, lastResults);
+  }
 
   const run = async () => {
     const slotIds = SLOTS.map((s) => ({
@@ -67,10 +85,21 @@ export async function renderRaceComparePage() {
         return { slot, torokuNo, profile, avgSt, recent, aptitude, rating };
       })
     );
+    lastResults = results;
     renderResults(resultsEl, results);
   };
 
+  const reset = () => {
+    SLOTS.forEach((s) => {
+      delete lastSlotValues[s];
+      content.querySelector<HTMLInputElement>(`#slot-${s}`)!.value = "";
+    });
+    lastResults = null;
+    resultsEl.innerHTML = "";
+  };
+
   content.querySelector("#go")!.addEventListener("click", run);
+  content.querySelector("#reset")!.addEventListener("click", reset);
 }
 
 interface SlotResult {
