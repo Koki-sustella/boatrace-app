@@ -11,7 +11,7 @@ DB_PATH = ROOT / "data" / "boatrace.duckdb"
 OUT_DIR = ROOT / "site" / "data"
 
 TABLES = [
-    "races", "entries", "program_entries",
+    "races", "entries", "program_entries", "payouts",
     "racers", "racer_history", "racer_period_stats",
     "grade_master",
     "agg_racer_course_month", "agg_racer_venue_course",

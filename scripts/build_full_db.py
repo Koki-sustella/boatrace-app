@@ -26,16 +26,17 @@ def iter_txt_files(subdir: str, prefix: str):
 
 
 def main():
-    all_races, all_boats = [], []
+    all_races, all_boats, all_payouts = [], [], []
     k_file_count = 0
     for p in iter_txt_files("kfile", "K"):
         date_str = p.stem[1:]
         text = p.read_bytes().decode("cp932", errors="replace").replace("\r\n", "\n")
-        races, boats, _ = parse_k_file(text, date_str)
+        races, boats, payouts, _ = parse_k_file(text, date_str)
         all_races += races
         all_boats += boats
+        all_payouts += payouts
         k_file_count += 1
-    print(f"K-files parsed: {k_file_count}, races={len(all_races)}, boat_results={len(all_boats)}", file=sys.stderr)
+    print(f"K-files parsed: {k_file_count}, races={len(all_races)}, boat_results={len(all_boats)}, payouts={len(all_payouts)}", file=sys.stderr)
 
     all_entries = []
     b_file_count = 0
@@ -53,12 +54,15 @@ def main():
     races_df = pd.DataFrame([asdict(r) for r in all_races])
     boats_df = pd.DataFrame([asdict(r) for r in all_boats])
     prog_df = pd.DataFrame([asdict(r) for r in all_entries])
+    payouts_df = pd.DataFrame([asdict(r) for r in all_payouts])
     con.register("races_df", races_df)
     con.register("boats_df", boats_df)
     con.register("prog_df", prog_df)
+    con.register("payouts_df", payouts_df)
     con.execute("CREATE OR REPLACE TABLE races AS SELECT * FROM races_df")
     con.execute("CREATE OR REPLACE TABLE entries AS SELECT * FROM boats_df")
     con.execute("CREATE OR REPLACE TABLE program_entries AS SELECT * FROM prog_df")
+    con.execute("CREATE OR REPLACE TABLE payouts AS SELECT * FROM payouts_df")
 
     # Load manifest for coverage check
     manifest_path = ROOT / "data" / "raw" / "download_manifest.csv"

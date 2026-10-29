@@ -25,6 +25,25 @@ RACE_HEADER_RE = re.compile(
 BOAT_LINE_RE = re.compile(r"^  (?P<finish>..)  (?P<frame>\d) (?P<regno>\d{4}) (?P<name>.{8})(?P<rest>.*)$")
 VALID_FINISH_RE = re.compile(r"^(0[0-6]|F.?|L[01_]?|K[01_]?|S[012_]?|[転沈不妨落エ失]\s?)$")
 
+# Payout section (within a race block, after its boat rows). Confirmed against
+# real files (see docs/derive_offsets_output.txt): one row per 単勝/複勝/２連単/
+# ２連複/３連単/３連複, three rows for 拡連複 (its three top-3 pairs) -- the
+# label is blank on 拡連複's 2nd/3rd continuation rows. Two special cases also
+# confirmed in real data: "特払い" (flat consolation payout, no combo -- seen
+# when too many boats are scratched/flying for a normal payout) and "不成立"
+# (that bet type alone is void -- seen when there aren't enough valid finishers
+# for it, even while other bet types in the same race paid out normally).
+PAYOUT_BET_TYPES = {
+    "単勝": "win", "複勝": "place", "２連単": "exacta2", "２連複": "quinella2",
+    "拡連複": "wide", "３連単": "exacta3", "３連複": "trio",
+}
+PAYOUT_LABEL_RE = re.compile(
+    "^\\s*(?P<label>" + "|".join(PAYOUT_BET_TYPES) + ")?\\s*(?P<rest>.*)$"
+)
+PAYOUT_COMBO_AMOUNT_RE = re.compile(r"(?P<combo>\d(?:-\d){0,2})\s+(?P<amount>\d+)")
+PAYOUT_NINKI_RE = re.compile(r"人気\s*(?P<ninki>\d+)")
+PAYOUT_SPECIAL_RE = re.compile(r"特払い\s+(?P<amount>\d+)")
+
 EXCEPTION_FINISH_CODES = {
     "F": "フライング",
     "L0": "出遅れ(責任外)", "L1": "出遅れ(責任)", "L": "出遅れ",
@@ -69,6 +88,19 @@ class BoatResult:
     start_timing: float | None
     start_is_flying: bool
     race_time_sec: float | None
+
+
+@dataclass
+class PayoutRow:
+    venue_code: str
+    date: str
+    race_no: int
+    bet_type: str  # win/place/exacta2/quinella2/wide/exacta3/trio
+    combo: str | None  # e.g. "6-2-5", or a single frame "6" for win/place; None if void
+    amount: int | None  # yen per 100-yen bet; None if void
+    ninki: int | None  # popularity rank; not reported for win/place
+    is_void: bool  # 不成立: this bet type alone had no valid payout for this race
+    is_special_payout: bool  # 特払い: flat consolation payout, no combo
 
 
 def _clean_name(raw: str) -> str:
@@ -142,15 +174,53 @@ def _parse_rest_tokens(rest: str):
     return motor_no, boat_no, exhibition_time, entry_course, start_timing, start_is_flying, race_time_sec
 
 
+def _parse_payout_line(line: str, venue_code: str, source_date: str, race_no: int, current_bet_type: str | None):
+    """Try to interpret `line` as one payout row for the current race. Returns
+    (PayoutRow | None, next_bet_type) -- next_bet_type carries forward so a
+    blank-label continuation row (拡連複's 2nd/3rd row) is attributed correctly."""
+    lm = PAYOUT_LABEL_RE.match(line)
+    label, rest = lm.group("label"), lm.group("rest")
+    bet_type = PAYOUT_BET_TYPES[label] if label else current_bet_type
+    if bet_type is None or not rest.strip():
+        return None, current_bet_type
+
+    if "不成立" in rest:
+        return PayoutRow(
+            venue_code=venue_code, date=source_date, race_no=race_no, bet_type=bet_type,
+            combo=None, amount=None, ninki=None, is_void=True, is_special_payout=False,
+        ), bet_type
+
+    sm = PAYOUT_SPECIAL_RE.search(rest)
+    if sm:
+        return PayoutRow(
+            venue_code=venue_code, date=source_date, race_no=race_no, bet_type=bet_type,
+            combo=None, amount=int(sm.group("amount")), ninki=None, is_void=False, is_special_payout=True,
+        ), bet_type
+
+    pairs = PAYOUT_COMBO_AMOUNT_RE.findall(rest)
+    if not pairs:
+        return None, bet_type
+    nm = PAYOUT_NINKI_RE.search(rest)
+    ninki = int(nm.group("ninki")) if nm else None
+    # Only win/place ever carry >1 pair per line, and neither reports a 人気.
+    combo, amount = pairs[0]
+    return PayoutRow(
+        venue_code=venue_code, date=source_date, race_no=race_no, bet_type=bet_type,
+        combo=combo, amount=int(amount), ninki=ninki, is_void=False, is_special_payout=False,
+    ), bet_type
+
+
 def parse_k_file(text: str, source_date: str):
     races: list[RaceHeader] = []
     boats: list[BoatResult] = []
+    payouts: list[PayoutRow] = []
     unparsed_lines: list[str] = []
 
     for m in VENUE_BLOCK_RE.finditer(text):
         venue_code, block = m.group(1), m.group(2)
         lines = block.splitlines()
         current_race = None
+        current_bet_type = None
         for line in lines:
             hm = RACE_HEADER_RE.match(line)
             if hm:
@@ -166,6 +236,7 @@ def parse_k_file(text: str, source_date: str):
                     wave_cm=int(hm.group("wave")),
                 )
                 races.append(current_race)
+                current_bet_type = None
                 continue
             bm = BOAT_LINE_RE.match(line)
             if bm and current_race is not None:
@@ -194,5 +265,12 @@ def parse_k_file(text: str, source_date: str):
                     start_is_flying=start_is_flying,
                     race_time_sec=race_time_sec,
                 ))
+                continue
+            if current_race is not None and line.strip():
+                payout, current_bet_type = _parse_payout_line(
+                    line, venue_code, source_date, current_race.race_no, current_bet_type
+                )
+                if payout:
+                    payouts.append(payout)
 
-    return races, boats, unparsed_lines
+    return races, boats, payouts, unparsed_lines

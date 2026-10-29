@@ -70,7 +70,7 @@ def append_day(con, d: date):
 
     if k_txt is not None:
         text = k_txt.read_bytes().decode("cp932", errors="replace").replace("\r\n", "\n")
-        races, boats, _ = parse_k_file(text, date_str)
+        races, boats, payouts, _ = parse_k_file(text, date_str)
         if races:
             races_df = pd.DataFrame([asdict(r) for r in races])
             con.register("new_races", races_df)
@@ -79,7 +79,11 @@ def append_day(con, d: date):
             boats_df = pd.DataFrame([asdict(r) for r in boats])
             con.register("new_entries", boats_df)
             con.execute("INSERT INTO entries SELECT * FROM new_entries")
-        print(f"{date_str}: +{len(races)} races, +{len(boats)} entries", file=sys.stderr)
+        if payouts:
+            payouts_df = pd.DataFrame([asdict(r) for r in payouts])
+            con.register("new_payouts", payouts_df)
+            con.execute("INSERT INTO payouts SELECT * FROM new_payouts")
+        print(f"{date_str}: +{len(races)} races, +{len(boats)} entries, +{len(payouts)} payouts", file=sys.stderr)
     else:
         print(f"{date_str}: K-file not available yet, skipping this date", file=sys.stderr)
         return False
