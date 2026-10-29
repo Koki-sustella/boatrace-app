@@ -47,10 +47,16 @@ export async function renderRaceComparePage() {
 
   // Enter key on any slot input triggers the same lookup as the button;
   // any edit updates the persisted value so it survives tab switches.
-  inputsEl.querySelectorAll<HTMLInputElement>("input").forEach((input, i) => {
+  // Registration numbers are always 4 digits, so once an input reaches that
+  // length, jump focus to the next slot automatically.
+  const slotInputs = inputsEl.querySelectorAll<HTMLInputElement>("input");
+  slotInputs.forEach((input, i) => {
     const slot = SLOTS[i];
     input.addEventListener("input", () => {
       lastSlotValues[slot] = input.value;
+      if (input.value.length >= 4 && i < slotInputs.length - 1) {
+        slotInputs[i + 1].focus();
+      }
     });
     input.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") run();
@@ -121,10 +127,10 @@ function renderResults(el: HTMLElement, results: SlotResult[]) {
       <div style="font-size:13px;margin:14px 0 6px;font-weight:600;">直近10走の1着回数比較</div>
       ${renderWinCountComparisonTable(results)}
     </div>
-    ${renderTrifectaCard(validResults)}
     <div class="compare-grid">
       ${results.map(renderSlotCard).join("")}
     </div>
+    ${renderTrifectaCard(validResults)}
   `;
   el.querySelectorAll<HTMLElement>("[data-goto]").forEach((link) => {
     link.addEventListener("click", () => navigate(`/player/${link.dataset.goto}`));
