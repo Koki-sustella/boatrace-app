@@ -550,18 +550,81 @@ export interface RacerLatestRatingRow {
   national_win_rate: number | null;
   local_win_rate: number | null;
   klass: string | null;
+  motor_2rentai_rate: number | null;
 }
 
-/** Most recently published national/local win rate and class for this racer,
- * taken from the latest program_entries row on record (the official
- * per-period rating the provider publishes ahead of each race). */
+/** Most recently published national/local win rate, class, and motor 2連対率
+ * for this racer, taken from the latest program_entries row on record (the
+ * official per-period rating the provider publishes ahead of each race).
+ * Motor assignment is per-race, not tied to the racer long-term, so this is
+ * only a "whatever motor they most recently had" proxy -- same caveat as the
+ * win-rate/class fields above. */
 export async function getRacerLatestRating(torokuNo: string): Promise<RacerLatestRatingRow> {
   const rows = await query<RacerLatestRatingRow>(`
-    SELECT national_win_rate, local_win_rate, klass
+    SELECT national_win_rate, local_win_rate, klass, motor_2rentai_rate
     FROM program_entries
     WHERE reg_no = '${escapeSqlString(torokuNo)}'
     ORDER BY date DESC
     LIMIT 1
   `);
-  return rows[0] ?? { national_win_rate: null, local_win_rate: null, klass: null };
+  return rows[0] ?? { national_win_rate: null, local_win_rate: null, klass: null, motor_2rentai_rate: null };
+}
+
+export interface MeetPerformanceRow {
+  avg_point: number | null; // finish-quality point: 1st=6 .. 6th=1, exception=0
+  starts: number;
+}
+
+/** 節間成績: this racer's average finish-quality point over starts already
+ * raced in their *current* meet (the multi-day event containing their most
+ * recent known race, per program_entries), from the meet's start date up to
+ * (not including) that date -- so no lookahead, and naturally empty on a
+ * meet's first day.
+ *
+ * Meet boundaries: grade_master's meet_start_date when available (named/
+ * graded events only -- confirmed by scripts/scrape_grades.py to cover a
+ * minority of races), else derived from date-contiguity at that venue (a new
+ * meet starts whenever there's a gap of more than 1 day since that venue's
+ * previous race day) -- see scripts/backtest_trifecta_meet.py for the
+ * backtest-side twin of this query. */
+export async function getRacerMeetPerformance(torokuNo: string): Promise<MeetPerformanceRow> {
+  const reg = escapeSqlString(torokuNo);
+  const rows = await query<MeetPerformanceRow>(`
+    WITH ref AS (
+      SELECT venue_code, date
+      FROM program_entries
+      WHERE reg_no = '${reg}'
+      ORDER BY date DESC
+      LIMIT 1
+    ),
+    venue_dates AS (
+      SELECT DISTINCT r.date, strptime(r.date, '%y%m%d')::DATE AS d
+      FROM races r, ref
+      WHERE r.venue_code = ref.venue_code AND r.date <= ref.date
+    ),
+    with_flag AS (
+      SELECT date, d,
+             CASE WHEN lag(d) OVER (ORDER BY d) IS NULL OR d - lag(d) OVER (ORDER BY d) > 1
+                  THEN 1 ELSE 0 END AS is_new_meet
+      FROM venue_dates
+    ),
+    computed_start AS (
+      SELECT max(date) AS computed_start FROM with_flag WHERE is_new_meet = 1
+    ),
+    meet_start AS (
+      SELECT COALESCE(
+        (SELECT strftime(strptime(g.meet_start_date, '%Y-%m-%d'), '%y%m%d')
+         FROM grade_master g, ref WHERE g.venue_code = ref.venue_code AND g.date = ref.date),
+        (SELECT computed_start FROM computed_start)
+      ) AS meet_start
+    )
+    SELECT
+      avg(CASE WHEN e.is_exception OR TRY_CAST(e.finish AS INTEGER) IS NULL THEN 0
+                ELSE 7 - TRY_CAST(e.finish AS INTEGER) END) AS avg_point,
+      count(*) AS starts
+    FROM entries e, ref, meet_start
+    WHERE e.reg_no = '${reg}' AND e.venue_code = ref.venue_code
+      AND e.date >= meet_start.meet_start AND e.date < ref.date
+  `);
+  return rows[0] ?? { avg_point: null, starts: 0 };
 }

@@ -4,15 +4,21 @@
  * full methodology writeup (priority weights, G1/SG weighting, Plackett-Luce
  * combination, the 枠番=進入コース assumption).
  */
-import type { RecentStartRow, CourseAvgSTRow, CourseAptitudeRow, RacerLatestRatingRow } from "./queries";
+import type {
+  RecentStartRow, CourseAvgSTRow, CourseAptitudeRow, RacerLatestRatingRow, MeetPerformanceRow,
+} from "./queries";
 
-// Weight configs found via scripts/backtest_trifecta_sweep2.py (general) and
+// Weight configs found via scripts/backtest_trifecta_sweep2.py (general),
 // scripts/backtest_trifecta_women_sweep.py (女子レース, all 6 entrants
 // female -- course aptitude is more predictive there and average ST less so,
 // likely because women racers have far fewer starts per course to begin
-// with, making ST noisier).
+// with, making ST noisier), scripts/backtest_trifecta_motor.py (motor's
+// 2連対率), and scripts/backtest_trifecta_meet.py (節間成績, this meet's
+// results so far). Both motor and meet are only weak signals on their own --
+// a light weight helps but overweighting either hurts quickly. Neither has
+// been validated for 女子レース specifically, so they're default-only for now.
 const WEIGHTS = {
-  default: { ca: 0.3, rf: 0.2, st: 0.15, wr: 0.3, cl: 0.05 },
+  default: { ca: 0.29, rf: 0.19, st: 0.14, wr: 0.22, cl: 0.05, motor: 0.05, meet: 0.06 },
   women: { ca: 0.5, rf: 0.2, st: 0.1, wr: 0.15, cl: 0.05 },
 };
 const GRADE_WEIGHT = 2.0;
@@ -20,6 +26,8 @@ const FALLBACK_POINT = 3.5;
 const FALLBACK_ST = 0.17;
 const FALLBACK_WR = 4.5; // roughly a B1 league-average win_rate
 const FALLBACK_CL = 2.0; // roughly B1
+const FALLBACK_MOTOR = 32.4; // roughly the league-average motor_2rentai_rate
+const FALLBACK_MEET = 3.5; // same point scale as CA/RF; used when no prior starts this meet (e.g. day 1)
 const STRENGTH_SCALE = 4.0;
 
 const CLASS_SCORE: Record<string, number> = { A1: 4.0, A2: 3.0, B1: 2.0, B2: 1.0 };
@@ -30,6 +38,7 @@ export interface BoatInput {
   avgSt: CourseAvgSTRow;
   aptitude: CourseAptitudeRow;
   rating: RacerLatestRatingRow;
+  meet: MeetPerformanceRow;
 }
 
 function finishPoint(finish: string | null, isException: boolean): number {
@@ -65,6 +74,14 @@ function classScore(rating: RacerLatestRatingRow): number {
   return CLASS_SCORE[rating.klass] ?? FALLBACK_CL;
 }
 
+function motorScore(rating: RacerLatestRatingRow): number {
+  return rating.motor_2rentai_rate ?? FALLBACK_MOTOR;
+}
+
+function meetScore(meet: MeetPerformanceRow): number {
+  return meet.starts > 0 ? meet.avg_point! : FALLBACK_MEET;
+}
+
 function normalize(values: number[]): number[] {
   const lo = Math.min(...values);
   const hi = Math.max(...values);
@@ -78,22 +95,22 @@ export interface TrifectaPick {
 }
 
 export function predictTrifecta(boats: BoatInput[], topN = 12, isWomensRace = false): TrifectaPick[] {
-  const w = isWomensRace ? WEIGHTS.women : WEIGHTS.default;
-  const rf = boats.map((b) => recentFormScore(b.recent));
-  const stRaw = boats.map((b) => (b.avgSt.starts > 0 ? -b.avgSt.avg_st! : -FALLBACK_ST));
-  const ca = boats.map((b) => (b.aptitude.starts > 0 ? b.aptitude.avg_point! : FALLBACK_POINT));
-  const wr = boats.map((b) => winRateScore(b.rating));
-  const cl = boats.map((b) => classScore(b.rating));
-
-  const rfN = normalize(rf);
-  const stN = normalize(stRaw);
-  const caN = normalize(ca);
-  const wrN = normalize(wr);
-  const clN = normalize(cl);
+  const w: Record<string, number> = isWomensRace ? WEIGHTS.women : WEIGHTS.default;
+  const raw: Record<string, number[]> = {
+    rf: boats.map((b) => recentFormScore(b.recent)),
+    st: boats.map((b) => (b.avgSt.starts > 0 ? -b.avgSt.avg_st! : -FALLBACK_ST)),
+    ca: boats.map((b) => (b.aptitude.starts > 0 ? b.aptitude.avg_point! : FALLBACK_POINT)),
+    wr: boats.map((b) => winRateScore(b.rating)),
+    cl: boats.map((b) => classScore(b.rating)),
+    motor: boats.map((b) => motorScore(b.rating)),
+    meet: boats.map((b) => meetScore(b.meet)),
+  };
+  const norm: Record<string, number[]> = {};
+  for (const key of Object.keys(w)) norm[key] = normalize(raw[key]);
 
   const strength = new Map<number, number>();
   boats.forEach((b, i) => {
-    const composite = w.ca * caN[i] + w.rf * rfN[i] + w.st * stN[i] + w.wr * wrN[i] + w.cl * clN[i];
+    const composite = Object.keys(w).reduce((sum, key) => sum + w[key] * norm[key][i], 0);
     strength.set(b.frame, Math.exp(STRENGTH_SCALE * composite));
   });
 
@@ -127,6 +144,8 @@ export interface BoatScoreBreakdown {
   ca: number;
   wr: number | null;
   cl: string | null;
+  motor: number | null;
+  meet: number | null;
 }
 
 export function scoreBreakdown(boats: BoatInput[]): BoatScoreBreakdown[] {
@@ -137,5 +156,7 @@ export function scoreBreakdown(boats: BoatInput[]): BoatScoreBreakdown[] {
     ca: b.aptitude.starts > 0 ? b.aptitude.avg_point! : FALLBACK_POINT,
     wr: b.rating.national_win_rate != null || b.rating.local_win_rate != null ? winRateScore(b.rating) : null,
     cl: b.rating.klass,
+    motor: b.rating.motor_2rentai_rate,
+    meet: b.meet.starts > 0 ? b.meet.avg_point! : null,
   }));
 }

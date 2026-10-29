@@ -3,7 +3,9 @@ import { navigate } from "../lib/router";
 import { venueName, formatDate } from "../lib/constants";
 import {
   getRacerProfile, getRecentStarts, getRacerCourseAvgST, getRacerCourseAptitude, getRacerLatestRating,
+  getRacerMeetPerformance,
   type RacerProfile, type RecentStartRow, type CourseAvgSTRow, type CourseAptitudeRow, type RacerLatestRatingRow,
+  type MeetPerformanceRow,
 } from "../lib/queries";
 import { predictTrifecta, scoreBreakdown, type BoatInput } from "../lib/trifectaPredict";
 
@@ -81,14 +83,15 @@ export async function renderRaceComparePage() {
     loading(resultsEl);
     const results = await Promise.all(
       slotIds.map(async ({ slot, torokuNo }) => {
-        const [profile, avgSt, recent, aptitude, rating] = await Promise.all([
+        const [profile, avgSt, recent, aptitude, rating, meet] = await Promise.all([
           getRacerProfile(torokuNo),
           getRacerCourseAvgST(torokuNo, slot),
           getRecentStarts(torokuNo, 10, slot),
           getRacerCourseAptitude(torokuNo, slot),
           getRacerLatestRating(torokuNo),
+          getRacerMeetPerformance(torokuNo),
         ]);
-        return { slot, torokuNo, profile, avgSt, recent, aptitude, rating };
+        return { slot, torokuNo, profile, avgSt, recent, aptitude, rating, meet };
       })
     );
     lastResults = results;
@@ -116,6 +119,7 @@ interface SlotResult {
   recent: RecentStartRow[];
   aptitude: CourseAptitudeRow;
   rating: RacerLatestRatingRow;
+  meet: MeetPerformanceRow;
 }
 
 function renderResults(el: HTMLElement, results: SlotResult[]) {
@@ -153,6 +157,7 @@ function renderTrifectaCard(results: SlotResult[]): string {
     avgSt: r.avgSt,
     aptitude: r.aptitude,
     rating: r.rating,
+    meet: r.meet,
   }));
   const isWomensRace = results.every((r) => r.profile!.sex === "女");
   const picks = predictTrifecta(boats, 12, isWomensRace);
@@ -181,6 +186,8 @@ function renderTrifectaCard(results: SlotResult[]): string {
         <td>${b.st != null ? b.st.toFixed(2) : "-"}</td>
         <td>${b.wr != null ? b.wr.toFixed(2) : "-"}</td>
         <td>${b.cl ?? "-"}</td>
+        <td>${b.motor != null ? b.motor.toFixed(2) : "-"}</td>
+        <td>${b.meet != null ? b.meet.toFixed(2) : "-"}</td>
       </tr>`
     )
     .join("");
@@ -189,7 +196,7 @@ function renderTrifectaCard(results: SlotResult[]): string {
     <div class="card">
       <div style="font-size:13px;margin-bottom:4px;font-weight:600;">3連単 買い目候補（上位${picks.length}点）${isWomensRace ? '<span class="badge" style="margin-left:6px;">女子レース用の重み</span>' : ""}</div>
       <p style="font-size:11px;color:var(--text-dim);margin:0 0 10px;">
-        考慮要素: コース適性(全場・全期間) / 全国・当地勝率 / 直近10走(G1・SG重み2倍) / 平均ST / 級別。
+        考慮要素: コース適性(全場・全期間) / 全国・当地勝率 / 直近10走(G1・SG重み2倍) / 平均ST / 級別 / モーター2連対率 / 節間成績。
         ${isWomensRace ? "出走6名が全員女性のため、女子レース専用の重み付けで算出しています。" : ""}
         統計的傾向に基づく参考情報であり、的中を保証するものではありません。
         枠番＝進入コースと仮定して算出しています。
@@ -204,7 +211,7 @@ function renderTrifectaCard(results: SlotResult[]): string {
         <summary style="cursor:pointer;color:var(--text-dim);">各艇のスコア内訳を見る</summary>
         <div class="table-scroll" style="margin-top:8px;">
           <table>
-            <thead><tr><th>枠</th><th>コース適性★点</th><th>直近10走★点</th><th>平均ST</th><th>全国/当地勝率</th><th>級別</th></tr></thead>
+            <thead><tr><th>枠</th><th>コース適性★点</th><th>直近10走★点</th><th>平均ST</th><th>全国/当地勝率</th><th>級別</th><th>モーター2連対率</th><th>節間成績</th></tr></thead>
             <tbody>${breakdownRows}</tbody>
           </table>
         </div>
