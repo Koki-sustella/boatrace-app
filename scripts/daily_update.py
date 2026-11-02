@@ -267,6 +267,29 @@ def main():
     import build_aggregates
     build_aggregates.main()  # always rebuild (cheap) to pick up the grade refresh too
 
+    if any_appended:
+        # Log the live model's real-outcome performance for the newly
+        # appended day(s) -- feeds the per-venue/per-period tracking in
+        # model_backtest_log (see scripts/log_model_backtest.py). Needs
+        # build_aggregates to have just run (agg_venue_course_overall feeds
+        # the model's venue x course factor) and payouts to exist for the
+        # day, which append_day's K-file parse already provides.
+        import log_model_backtest
+        log_con = duckdb.connect(str(DB_PATH))
+        log_model_backtest.ensure_table(log_con)
+        last_logged = log_con.execute("SELECT max(date) FROM model_backtest_log").fetchone()[0]
+        last_available = log_con.execute(
+            "SELECT max(r.date) FROM races r WHERE EXISTS (SELECT 1 FROM payouts p WHERE p.venue_code=r.venue_code AND p.date=r.date AND p.race_no=r.race_no)"
+        ).fetchone()[0]
+        if last_available is not None:
+            start = (
+                log_model_backtest._to_yymmdd(log_model_backtest._to_date(last_logged) + timedelta(days=1))
+                if last_logged else last_available
+            )
+            if log_model_backtest._to_date(start) <= log_model_backtest._to_date(last_available):
+                log_model_backtest.log_dates(log_con, log_model_backtest.date_range(start, last_available))
+        log_con.close()
+
     import export_parquet
     export_parquet.main()
 
