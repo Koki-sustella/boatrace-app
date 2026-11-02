@@ -81,7 +81,14 @@ def log_dates(con, dates: list[str]):
     if new_rows:
         df = pd.DataFrame(new_rows)
         con.register("new_backtest_rows", df)
-        con.execute("INSERT INTO model_backtest_log SELECT * FROM new_backtest_rows")
+        # Explicit column lists on both sides: INSERT INTO ... SELECT * matches
+        # by position, not name, and evaluate_race()'s dict key order doesn't
+        # match the table's declared column order (venue_code/date swapped),
+        # which silently corrupted every row the first time this ran.
+        con.execute("""
+            INSERT INTO model_backtest_log (date, venue_code, race_no, is_women, hit, stake, return_amount, model_version)
+            SELECT date, venue_code, race_no, is_women, hit, stake, return_amount, model_version FROM new_backtest_rows
+        """)
     print(f"Logged {len(new_rows)} new race rows (model_version={MODEL_VERSION})", file=sys.stderr)
 
 
