@@ -526,6 +526,19 @@ export async function getAllVenueCourseWinRates(): Promise<VenueCourseWinRateRow
   `);
 }
 
+/** This venue's win rate per course (1-6), independent of which racer is in
+ * it -- the same structural favorite-course bias shown on the 場×コース
+ * page, confirmed by backtesting (scripts/backtest_trifecta_venuecourse.py)
+ * to be the single strongest factor found for the trifecta model so far. */
+export async function getVenueCourseWinRates(venueCode: string): Promise<VenueCourseWinRateRow[]> {
+  return query<VenueCourseWinRateRow>(`
+    SELECT venue_code, entry_course, win_rate, place2_rate, place3_rate, starts_valid
+    FROM agg_venue_course_overall
+    WHERE venue_code = '${escapeSqlString(venueCode)}'
+    ORDER BY entry_course
+  `);
+}
+
 export interface CourseAptitudeRow {
   avg_point: number | null; // finish-quality point: 1st=6 .. 6th=1, exception=0
   starts: number;
@@ -613,9 +626,8 @@ export async function getRacerMeetPerformance(torokuNo: string): Promise<MeetPer
     ),
     meet_start AS (
       SELECT COALESCE(
-        (SELECT strftime(strptime(g.meet_start_date, '%Y-%m-%d'), '%y%m%d')
-         FROM grade_master g, ref WHERE g.venue_code = ref.venue_code AND g.date = ref.date
-         ORDER BY g.meet_start_date LIMIT 1),
+        (SELECT min(strftime(strptime(g.meet_start_date, '%Y-%m-%d'), '%y%m%d'))
+         FROM grade_master g, ref WHERE g.venue_code = ref.venue_code AND g.date = ref.date),
         (SELECT computed_start FROM computed_start)
       ) AS meet_start
     )
@@ -774,9 +786,8 @@ export async function getRacerMeetPerformancesBatch(torokuNos: string[]): Promis
     meet_start_lookup AS (
       SELECT r.reg_no, r.venue_code, r.date,
              COALESCE(
-               (SELECT strftime(strptime(g.meet_start_date, '%Y-%m-%d'), '%y%m%d')
-                FROM grade_master g WHERE g.venue_code = r.venue_code AND g.date = r.date
-                ORDER BY g.meet_start_date LIMIT 1),
+               (SELECT min(strftime(strptime(g.meet_start_date, '%Y-%m-%d'), '%y%m%d'))
+                FROM grade_master g WHERE g.venue_code = r.venue_code AND g.date = r.date),
                c.computed_start
              ) AS meet_start
       FROM ref1 r

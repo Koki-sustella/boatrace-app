@@ -1,9 +1,9 @@
 import { renderShell, loading } from "../components/shell";
 import { navigate } from "../lib/router";
-import { venueName, formatDate } from "../lib/constants";
+import { venueName, formatDate, VENUE_CODES } from "../lib/constants";
 import {
   getRacerProfilesBatch, getRecentStartsBatch, getCourseStatsBatch, getRacerLatestRatingsBatch,
-  getRacerMeetPerformancesBatch, racerCourseKey,
+  getRacerMeetPerformancesBatch, getVenueCourseWinRates, racerCourseKey,
   type RacerProfile, type RecentStartRow, type CourseAvgSTRow, type CourseAptitudeRow, type RacerLatestRatingRow,
   type MeetPerformanceRow,
 } from "../lib/queries";
@@ -15,15 +15,23 @@ const SLOTS = [1, 2, 3, 4, 5, 6];
 // since the module isn't re-evaluated -- only cleared by an explicit reset
 // or a full page reload).
 const lastSlotValues: Record<number, string> = {};
+let lastVenue = "";
 let lastResults: SlotResult[] | null = null;
 
 export async function renderRaceComparePage() {
   const content = renderShell({ title: "直前比較", activeNav: "race-compare" });
   content.innerHTML = `
     <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">
-      1〜6号艇の登録番号を入力すると、各艇の枠番コースでの平均STを一覧比較し、
+      競艇場と1〜6号艇の登録番号を入力すると、各艇の枠番コースでの平均STを一覧比較し、
       その号艇のコースに限定した直近10走・3連単の買い目候補を表示します。
     </p>
+    <div class="field">
+      <label for="venue-select">競艇場</label>
+      <select id="venue-select">
+        <option value="">選択してください</option>
+        ${VENUE_CODES.map((c) => `<option value="${c}" ${c === lastVenue ? "selected" : ""}>${venueName(c)}</option>`).join("")}
+      </select>
+    </div>
     <div id="slot-inputs"></div>
     <div style="display:flex;gap:8px;margin:8px 0 16px;">
       <button class="primary" id="go" style="flex:1;">表示</button>
@@ -31,6 +39,10 @@ export async function renderRaceComparePage() {
     </div>
     <div id="results"></div>
   `;
+
+  content.querySelector<HTMLSelectElement>("#venue-select")!.addEventListener("change", (e) => {
+    lastVenue = (e.target as HTMLSelectElement).value;
+  });
 
   const inputsEl = content.querySelector<HTMLElement>("#slot-inputs")!;
   inputsEl.innerHTML = `
@@ -66,10 +78,11 @@ export async function renderRaceComparePage() {
   });
 
   if (lastResults) {
-    renderResults(resultsEl, lastResults);
+    renderResults(resultsEl, lastResults, lastVenue);
   }
 
   const run = async () => {
+    const venue = content.querySelector<HTMLSelectElement>("#venue-select")!.value;
     const slotIds = SLOTS.map((s) => ({
       slot: s,
       torokuNo: content.querySelector<HTMLInputElement>(`#slot-${s}`)!.value.trim(),
@@ -82,13 +95,15 @@ export async function renderRaceComparePage() {
 
     loading(resultsEl);
     const torokuNos = slotIds.map((x) => x.torokuNo);
-    const [profiles, courseStats, recentByKey, ratings, meets] = await Promise.all([
+    const [profiles, courseStats, recentByKey, ratings, meets, venueCourseRows] = await Promise.all([
       getRacerProfilesBatch(torokuNos),
       getCourseStatsBatch(slotIds.map(({ slot, torokuNo }) => ({ torokuNo, course: slot }))),
       getRecentStartsBatch(slotIds.map(({ slot, torokuNo }) => ({ torokuNo, course: slot })), 10),
       getRacerLatestRatingsBatch(torokuNos),
       getRacerMeetPerformancesBatch(torokuNos),
+      venue ? getVenueCourseWinRates(venue) : Promise.resolve([]),
     ]);
+    const vcByCourse = new Map(venueCourseRows.map((r) => [r.entry_course, r.win_rate]));
 
     const results = slotIds.map(({ slot, torokuNo }) => {
       const key = racerCourseKey(torokuNo, slot);
@@ -102,10 +117,11 @@ export async function renderRaceComparePage() {
         aptitude: stats?.aptitude ?? { avg_point: null, starts: 0 },
         rating: ratings.get(torokuNo) ?? { national_win_rate: null, local_win_rate: null, klass: null, motor_2rentai_rate: null },
         meet: meets.get(torokuNo) ?? { avg_point: null, starts: 0 },
+        vcWinRate: vcByCourse.get(slot) ?? null,
       };
     });
     lastResults = results;
-    renderResults(resultsEl, results);
+    renderResults(resultsEl, results, venue);
   };
 
   const reset = () => {
@@ -113,6 +129,8 @@ export async function renderRaceComparePage() {
       delete lastSlotValues[s];
       content.querySelector<HTMLInputElement>(`#slot-${s}`)!.value = "";
     });
+    lastVenue = "";
+    content.querySelector<HTMLSelectElement>("#venue-select")!.value = "";
     lastResults = null;
     resultsEl.innerHTML = "";
   };
@@ -130,9 +148,10 @@ interface SlotResult {
   aptitude: CourseAptitudeRow;
   rating: RacerLatestRatingRow;
   meet: MeetPerformanceRow;
+  vcWinRate: number | null;
 }
 
-function renderResults(el: HTMLElement, results: SlotResult[]) {
+function renderResults(el: HTMLElement, results: SlotResult[], venue: string) {
   const validResults = results.filter((r) => r.profile);
   el.innerHTML = `
     <div class="card">
@@ -144,14 +163,14 @@ function renderResults(el: HTMLElement, results: SlotResult[]) {
     <div class="compare-grid">
       ${results.map(renderSlotCard).join("")}
     </div>
-    ${renderTrifectaCard(validResults)}
+    ${renderTrifectaCard(validResults, venue)}
   `;
   el.querySelectorAll<HTMLElement>("[data-goto]").forEach((link) => {
     link.addEventListener("click", () => navigate(`/player/${link.dataset.goto}`));
   });
 }
 
-function renderTrifectaCard(results: SlotResult[]): string {
+function renderTrifectaCard(results: SlotResult[], venue: string): string {
   if (results.length < 3) {
     return `
       <div class="card">
@@ -168,6 +187,7 @@ function renderTrifectaCard(results: SlotResult[]): string {
     aptitude: r.aptitude,
     rating: r.rating,
     meet: r.meet,
+    vcWinRate: r.vcWinRate,
   }));
   const isWomensRace = results.every((r) => r.profile!.sex === "女");
   const picks = predictTrifecta(boats, 12, isWomensRace);
@@ -198,6 +218,7 @@ function renderTrifectaCard(results: SlotResult[]): string {
         <td>${b.cl ?? "-"}</td>
         <td>${b.motor != null ? b.motor.toFixed(2) : "-"}</td>
         <td>${b.meet != null ? b.meet.toFixed(2) : "-"}</td>
+        <td>${b.vc != null ? (b.vc * 100).toFixed(1) + "%" : "-"}</td>
       </tr>`
     )
     .join("");
@@ -206,12 +227,13 @@ function renderTrifectaCard(results: SlotResult[]): string {
     <div class="card">
       <div style="font-size:13px;margin-bottom:4px;font-weight:600;">各艇のスコア内訳${isWomensRace ? '<span class="badge" style="margin-left:6px;">女子レース用の重み</span>' : ""}</div>
       <p style="font-size:11px;color:var(--text-dim);margin:0 0 10px;">
-        考慮要素: コース適性(全場・全期間) / 全国・当地勝率 / 直近10走(G1・SG重み2倍) / 平均ST / 級別 / モーター2連対率 / 節間成績。
+        考慮要素: コース適性(全場・全期間) / 全国・当地勝率 / 直近10走(G1・SG重み2倍) / 平均ST / 級別 / モーター2連対率 / 節間成績 / 場×コース勝率。
         ${isWomensRace ? "出走6名が全員女性のため、女子レース専用の重み付けで算出しています。" : ""}
+        ${!venue ? '<br><span style="color:var(--warn);">競艇場が未選択のため、場×コース勝率は反映されていません。</span>' : ""}
       </p>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>枠</th><th>コース適性★点</th><th>直近10走★点</th><th>平均ST</th><th>全国/当地勝率</th><th>級別</th><th>モーター2連対率</th><th>節間成績</th></tr></thead>
+          <thead><tr><th>枠</th><th>コース適性★点</th><th>直近10走★点</th><th>平均ST</th><th>全国/当地勝率</th><th>級別</th><th>モーター2連対率</th><th>節間成績</th><th>場×コース勝率</th></tr></thead>
           <tbody>${breakdownRows}</tbody>
         </table>
       </div>

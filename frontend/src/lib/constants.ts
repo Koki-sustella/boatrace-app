@@ -7,7 +7,12 @@ export const VENUE_NAMES: Record<string, string> = {
   "21": "芦屋", "22": "福岡", "23": "唐津", "24": "大村",
 };
 
-export const VENUE_CODES = Object.keys(VENUE_NAMES);
+// Object.keys() would NOT yield "01".."24" in that order: JS enumerates
+// integer-index-like keys ("10".."24", which round-trip through Number)
+// ascending before any other keys, so "10".."24" would jump ahead of
+// "01".."09". Sorting these specific zero-padded 2-digit strings
+// lexicographically happens to match the intended numeric order exactly.
+export const VENUE_CODES = Object.keys(VENUE_NAMES).sort();
 
 export function venueName(code: string): string {
   return VENUE_NAMES[code] ?? code;

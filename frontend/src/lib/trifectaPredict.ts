@@ -13,12 +13,15 @@ import type {
 // female -- course aptitude is more predictive there and average ST less so,
 // likely because women racers have far fewer starts per course to begin
 // with, making ST noisier), scripts/backtest_trifecta_motor.py (motor's
-// 2連対率), and scripts/backtest_trifecta_meet.py (節間成績, this meet's
-// results so far). Both motor and meet are only weak signals on their own --
-// a light weight helps but overweighting either hurts quickly. Neither has
-// been validated for 女子レース specifically, so they're default-only for now.
+// 2連対率), scripts/backtest_trifecta_meet.py (節間成績, this meet's results
+// so far), and scripts/backtest_trifecta_venuecourse.py (vc: this venue's
+// win rate for this course, independent of the racer -- the single strongest
+// factor found so far, 46.9%→52.1% hit rate / 69.8%→75.1% ROI in backtest).
+// Motor/meet are only weak signals on their own -- a light weight helps but
+// overweighting either hurts quickly. None of motor/meet/vc has been
+// validated for 女子レース specifically, so they're default-only for now.
 const WEIGHTS = {
-  default: { ca: 0.29, rf: 0.19, st: 0.14, wr: 0.22, cl: 0.05, motor: 0.05, meet: 0.06 },
+  default: { ca: 0.19, rf: 0.12, st: 0.09, wr: 0.14, cl: 0.05, motor: 0.05, meet: 0.06, vc: 0.3 },
   women: { ca: 0.5, rf: 0.2, st: 0.1, wr: 0.15, cl: 0.05 },
 };
 const GRADE_WEIGHT = 2.0;
@@ -28,6 +31,7 @@ const FALLBACK_WR = 4.5; // roughly a B1 league-average win_rate
 const FALLBACK_CL = 2.0; // roughly B1
 const FALLBACK_MOTOR = 32.4; // roughly the league-average motor_2rentai_rate
 const FALLBACK_MEET = 3.5; // same point scale as CA/RF; used when no prior starts this meet (e.g. day 1)
+const FALLBACK_VC = 0.14; // roughly a flat 1/6 if this venue+course has no history
 const STRENGTH_SCALE = 4.0;
 
 const CLASS_SCORE: Record<string, number> = { A1: 4.0, A2: 3.0, B1: 2.0, B2: 1.0 };
@@ -39,6 +43,7 @@ export interface BoatInput {
   aptitude: CourseAptitudeRow;
   rating: RacerLatestRatingRow;
   meet: MeetPerformanceRow;
+  vcWinRate: number | null; // this venue's win rate for this boat's course, independent of the racer
 }
 
 function finishPoint(finish: string | null, isException: boolean): number {
@@ -82,6 +87,10 @@ function meetScore(meet: MeetPerformanceRow): number {
   return meet.starts > 0 ? meet.avg_point! : FALLBACK_MEET;
 }
 
+function vcScore(vcWinRate: number | null): number {
+  return vcWinRate ?? FALLBACK_VC;
+}
+
 function normalize(values: number[]): number[] {
   const lo = Math.min(...values);
   const hi = Math.max(...values);
@@ -104,6 +113,7 @@ export function predictTrifecta(boats: BoatInput[], topN = 12, isWomensRace = fa
     cl: boats.map((b) => classScore(b.rating)),
     motor: boats.map((b) => motorScore(b.rating)),
     meet: boats.map((b) => meetScore(b.meet)),
+    vc: boats.map((b) => vcScore(b.vcWinRate)),
   };
   const norm: Record<string, number[]> = {};
   for (const key of Object.keys(w)) norm[key] = normalize(raw[key]);
@@ -146,6 +156,7 @@ export interface BoatScoreBreakdown {
   cl: string | null;
   motor: number | null;
   meet: number | null;
+  vc: number | null;
 }
 
 export function scoreBreakdown(boats: BoatInput[]): BoatScoreBreakdown[] {
@@ -158,5 +169,6 @@ export function scoreBreakdown(boats: BoatInput[]): BoatScoreBreakdown[] {
     cl: b.rating.klass,
     motor: b.rating.motor_2rentai_rate,
     meet: b.meet.starts > 0 ? b.meet.avg_point! : null,
+    vc: b.vcWinRate,
   }));
 }
