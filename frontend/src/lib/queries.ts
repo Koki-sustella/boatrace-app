@@ -614,7 +614,8 @@ export async function getRacerMeetPerformance(torokuNo: string): Promise<MeetPer
     meet_start AS (
       SELECT COALESCE(
         (SELECT strftime(strptime(g.meet_start_date, '%Y-%m-%d'), '%y%m%d')
-         FROM grade_master g, ref WHERE g.venue_code = ref.venue_code AND g.date = ref.date),
+         FROM grade_master g, ref WHERE g.venue_code = ref.venue_code AND g.date = ref.date
+         ORDER BY g.meet_start_date LIMIT 1),
         (SELECT computed_start FROM computed_start)
       ) AS meet_start
     )
@@ -627,4 +628,168 @@ export async function getRacerMeetPerformance(torokuNo: string): Promise<MeetPer
       AND e.date >= meet_start.meet_start AND e.date < ref.date
   `);
   return rows[0] ?? { avg_point: null, starts: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Batched variants of the above, for pages (直前比較) that need the same
+// per-racer lookups for several racers at once. DuckDB-WASM serves one query
+// at a time regardless of how many are in flight client-side (no real
+// concurrency), so N separate per-racer round trips cost N times the latency
+// of one batched round trip covering all of them -- these fetch everyone in a
+// single query each instead of one query per racer.
+
+function inList(values: string[]): string {
+  return values.map((v) => `'${escapeSqlString(v)}'`).join(",");
+}
+
+function pairValues(pairs: { torokuNo: string; course: number }[]): string {
+  return pairs.map((p) => `('${escapeSqlString(p.torokuNo)}', ${p.course})`).join(",");
+}
+
+/** Batched getRacerProfile: toroku_no -> RacerProfile (missing racers simply
+ * have no entry in the returned map). */
+export async function getRacerProfilesBatch(torokuNos: string[]): Promise<Map<string, RacerProfile>> {
+  if (!torokuNos.length) return new Map();
+  const rows = await query<RacerProfile>(`
+    SELECT r.toroku_no, r.birth_date, r.sex, r.training_period, REPLACE(r.hometown, '　', '') AS hometown,
+           REPLACE(REPLACE(rc.name_kanji, '　', ''), ' ', '') AS name_kanji, rc.klass, rc.branch
+    FROM racers r JOIN racer_current rc USING (toroku_no)
+    WHERE r.toroku_no IN (${inList(torokuNos)})
+  `);
+  return new Map(rows.map((r) => [r.toroku_no, r]));
+}
+
+/** Key for the per-(racer, course) batch maps below -- a plain reg_no isn't
+ * enough if the same registration number were ever entered for two different
+ * slots/courses at once. */
+export function racerCourseKey(torokuNo: string, course: number): string {
+  return `${torokuNo}|${course}`;
+}
+
+/** Batched getRacerCourseAvgST + getRacerCourseAptitude combined (both are
+ * aggregates over the same reg_no+course-filtered rows): racerCourseKey ->
+ * {avgSt, aptitude}. `pairs` is each slot's (registration number, course). */
+export async function getCourseStatsBatch(
+  pairs: { torokuNo: string; course: number }[]
+): Promise<Map<string, { avgSt: CourseAvgSTRow; aptitude: CourseAptitudeRow }>> {
+  if (!pairs.length) return new Map();
+  const rows = await query<{ reg_no: string; entry_course: number; avg_st: number | null; st_starts: number; avg_point: number | null; pt_starts: number }>(`
+    SELECT reg_no, entry_course,
+           avg(start_timing) AS avg_st, count(start_timing) AS st_starts,
+           avg(CASE WHEN is_exception OR TRY_CAST(finish AS INTEGER) IS NULL THEN 0
+                     ELSE 7 - TRY_CAST(finish AS INTEGER) END) AS avg_point,
+           count(*) AS pt_starts
+    FROM entries_enriched
+    WHERE (reg_no, entry_course) IN (VALUES ${pairValues(pairs)})
+    GROUP BY reg_no, entry_course
+  `);
+  return new Map(
+    rows.map((r) => [
+      racerCourseKey(r.reg_no, r.entry_course),
+      {
+        avgSt: { avg_st: r.avg_st, starts: Number(r.st_starts) },
+        aptitude: { avg_point: r.avg_point, starts: Number(r.pt_starts) },
+      },
+    ])
+  );
+}
+
+/** Batched getRecentStarts (course-filtered, top 10 per racer): racerCourseKey -> rows. */
+export async function getRecentStartsBatch(
+  pairs: { torokuNo: string; course: number }[],
+  limit = 10
+): Promise<Map<string, RecentStartRow[]>> {
+  if (!pairs.length) return new Map();
+  const rows = await query<RecentStartRow & { reg_no: string }>(`
+    SELECT reg_no, date, venue_code, race_no, entry_course, finish, exception_label, start_timing, race_time_sec, grade
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY reg_no, entry_course ORDER BY date DESC, race_no DESC) AS rn
+      FROM entries_enriched
+      WHERE (reg_no, entry_course) IN (VALUES ${pairValues(pairs)})
+    )
+    WHERE rn <= ${limit}
+    ORDER BY reg_no, date DESC, race_no DESC
+  `);
+  const out = new Map<string, RecentStartRow[]>();
+  for (const { reg_no, ...row } of rows) {
+    const key = racerCourseKey(reg_no, row.entry_course!);
+    if (!out.has(key)) out.set(key, []);
+    out.get(key)!.push(row);
+  }
+  return out;
+}
+
+/** Batched getRacerLatestRating: toroku_no -> RacerLatestRatingRow. */
+export async function getRacerLatestRatingsBatch(torokuNos: string[]): Promise<Map<string, RacerLatestRatingRow>> {
+  if (!torokuNos.length) return new Map();
+  const rows = await query<RacerLatestRatingRow & { reg_no: string }>(`
+    SELECT reg_no, national_win_rate, local_win_rate, klass, motor_2rentai_rate
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY reg_no ORDER BY date DESC) AS rn
+      FROM program_entries
+      WHERE reg_no IN (${inList(torokuNos)})
+    )
+    WHERE rn = 1
+  `);
+  return new Map(rows.map(({ reg_no, ...r }) => [reg_no, r]));
+}
+
+/** Batched getRacerMeetPerformance: toroku_no -> MeetPerformanceRow. Computes
+ * meet boundaries for every venue once (cheap -- the races table is tiny)
+ * instead of once per racer, then joins each racer's latest program_entries
+ * row to it. Same methodology as the single-racer version; see its docstring. */
+export async function getRacerMeetPerformancesBatch(torokuNos: string[]): Promise<Map<string, MeetPerformanceRow>> {
+  if (!torokuNos.length) return new Map();
+  const rows = await query<{ reg_no: string; avg_point: number | null; starts: number }>(`
+    WITH ref AS (
+      SELECT reg_no, venue_code, date,
+             ROW_NUMBER() OVER (PARTITION BY reg_no ORDER BY date DESC) AS rn
+      FROM program_entries
+      WHERE reg_no IN (${inList(torokuNos)})
+    ),
+    ref1 AS (SELECT reg_no, venue_code, date FROM ref WHERE rn = 1),
+    venue_dates AS (
+      SELECT DISTINCT venue_code, date, strptime(date, '%y%m%d')::DATE AS d
+      FROM races
+    ),
+    with_flag AS (
+      SELECT venue_code, date, d,
+             CASE WHEN lag(d) OVER (PARTITION BY venue_code ORDER BY d) IS NULL
+                       OR d - lag(d) OVER (PARTITION BY venue_code ORDER BY d) > 1
+                  THEN 1 ELSE 0 END AS is_new_meet
+      FROM venue_dates
+    ),
+    meet_id AS (
+      SELECT venue_code, date, d, sum(is_new_meet) OVER (PARTITION BY venue_code ORDER BY d) AS mid
+      FROM with_flag
+    ),
+    computed AS (
+      SELECT venue_code, date, strftime(min(d) OVER (PARTITION BY venue_code, mid), '%y%m%d') AS computed_start
+      FROM meet_id
+    ),
+    -- Only resolve the grade_master/computed-fallback meet start for the
+    -- handful of (venue,date) pairs actually in this batch, not all ~9000
+    -- historical race-days -- the correlated subquery below is cheap at that
+    -- scale but wasteful run once per row of the computed CTE.
+    meet_start_lookup AS (
+      SELECT r.reg_no, r.venue_code, r.date,
+             COALESCE(
+               (SELECT strftime(strptime(g.meet_start_date, '%Y-%m-%d'), '%y%m%d')
+                FROM grade_master g WHERE g.venue_code = r.venue_code AND g.date = r.date
+                ORDER BY g.meet_start_date LIMIT 1),
+               c.computed_start
+             ) AS meet_start
+      FROM ref1 r
+      JOIN computed c ON c.venue_code = r.venue_code AND c.date = r.date
+    )
+    SELECT ms.reg_no,
+           avg(CASE WHEN e.is_exception OR TRY_CAST(e.finish AS INTEGER) IS NULL THEN 0
+                     ELSE 7 - TRY_CAST(e.finish AS INTEGER) END) FILTER (WHERE e.reg_no IS NOT NULL) AS avg_point,
+           count(e.reg_no) AS starts
+    FROM meet_start_lookup ms
+    LEFT JOIN entries e ON e.reg_no = ms.reg_no AND e.venue_code = ms.venue_code
+                        AND e.date >= ms.meet_start AND e.date < ms.date
+    GROUP BY ms.reg_no
+  `);
+  return new Map(rows.map((r) => [r.reg_no, { avg_point: r.avg_point, starts: Number(r.starts) }]));
 }

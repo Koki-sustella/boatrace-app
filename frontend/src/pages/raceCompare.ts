@@ -2,8 +2,8 @@ import { renderShell, loading } from "../components/shell";
 import { navigate } from "../lib/router";
 import { venueName, formatDate } from "../lib/constants";
 import {
-  getRacerProfile, getRecentStarts, getRacerCourseAvgST, getRacerCourseAptitude, getRacerLatestRating,
-  getRacerMeetPerformance,
+  getRacerProfilesBatch, getRecentStartsBatch, getCourseStatsBatch, getRacerLatestRatingsBatch,
+  getRacerMeetPerformancesBatch, racerCourseKey,
   type RacerProfile, type RecentStartRow, type CourseAvgSTRow, type CourseAptitudeRow, type RacerLatestRatingRow,
   type MeetPerformanceRow,
 } from "../lib/queries";
@@ -81,19 +81,29 @@ export async function renderRaceComparePage() {
     }
 
     loading(resultsEl);
-    const results = await Promise.all(
-      slotIds.map(async ({ slot, torokuNo }) => {
-        const [profile, avgSt, recent, aptitude, rating, meet] = await Promise.all([
-          getRacerProfile(torokuNo),
-          getRacerCourseAvgST(torokuNo, slot),
-          getRecentStarts(torokuNo, 10, slot),
-          getRacerCourseAptitude(torokuNo, slot),
-          getRacerLatestRating(torokuNo),
-          getRacerMeetPerformance(torokuNo),
-        ]);
-        return { slot, torokuNo, profile, avgSt, recent, aptitude, rating, meet };
-      })
-    );
+    const torokuNos = slotIds.map((x) => x.torokuNo);
+    const [profiles, courseStats, recentByKey, ratings, meets] = await Promise.all([
+      getRacerProfilesBatch(torokuNos),
+      getCourseStatsBatch(slotIds.map(({ slot, torokuNo }) => ({ torokuNo, course: slot }))),
+      getRecentStartsBatch(slotIds.map(({ slot, torokuNo }) => ({ torokuNo, course: slot })), 10),
+      getRacerLatestRatingsBatch(torokuNos),
+      getRacerMeetPerformancesBatch(torokuNos),
+    ]);
+
+    const results = slotIds.map(({ slot, torokuNo }) => {
+      const key = racerCourseKey(torokuNo, slot);
+      const stats = courseStats.get(key);
+      return {
+        slot,
+        torokuNo,
+        profile: profiles.get(torokuNo) ?? null,
+        avgSt: stats?.avgSt ?? { avg_st: null, starts: 0 },
+        recent: recentByKey.get(key) ?? [],
+        aptitude: stats?.aptitude ?? { avg_point: null, starts: 0 },
+        rating: ratings.get(torokuNo) ?? { national_win_rate: null, local_win_rate: null, klass: null, motor_2rentai_rate: null },
+        meet: meets.get(torokuNo) ?? { avg_point: null, starts: 0 },
+      };
+    });
     lastResults = results;
     renderResults(resultsEl, results);
   };
@@ -194,25 +204,27 @@ function renderTrifectaCard(results: SlotResult[]): string {
 
   return `
     <div class="card">
-      <div style="font-size:13px;margin-bottom:4px;font-weight:600;">3連単 買い目候補（上位${picks.length}点）${isWomensRace ? '<span class="badge" style="margin-left:6px;">女子レース用の重み</span>' : ""}</div>
+      <div style="font-size:13px;margin-bottom:4px;font-weight:600;">各艇のスコア内訳${isWomensRace ? '<span class="badge" style="margin-left:6px;">女子レース用の重み</span>' : ""}</div>
       <p style="font-size:11px;color:var(--text-dim);margin:0 0 10px;">
         考慮要素: コース適性(全場・全期間) / 全国・当地勝率 / 直近10走(G1・SG重み2倍) / 平均ST / 級別 / モーター2連対率 / 節間成績。
         ${isWomensRace ? "出走6名が全員女性のため、女子レース専用の重み付けで算出しています。" : ""}
-        統計的傾向に基づく参考情報であり、的中を保証するものではありません。
-        枠番＝進入コースと仮定して算出しています。
       </p>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>順位</th><th>3連単</th><th style="text-align:left;">選手</th><th>推定確率</th></tr></thead>
-          <tbody>${picksRows}</tbody>
+          <thead><tr><th>枠</th><th>コース適性★点</th><th>直近10走★点</th><th>平均ST</th><th>全国/当地勝率</th><th>級別</th><th>モーター2連対率</th><th>節間成績</th></tr></thead>
+          <tbody>${breakdownRows}</tbody>
         </table>
       </div>
       <details style="margin-top:10px;font-size:12px;">
-        <summary style="cursor:pointer;color:var(--text-dim);">各艇のスコア内訳を見る</summary>
-        <div class="table-scroll" style="margin-top:8px;">
+        <summary style="cursor:pointer;color:var(--text-dim);">3連単 買い目候補（上位${picks.length}点）を見る</summary>
+        <p style="font-size:11px;color:var(--text-dim);margin:8px 0 10px;">
+          統計的傾向に基づく参考情報であり、的中を保証するものではありません。
+          枠番＝進入コースと仮定して算出しています。
+        </p>
+        <div class="table-scroll">
           <table>
-            <thead><tr><th>枠</th><th>コース適性★点</th><th>直近10走★点</th><th>平均ST</th><th>全国/当地勝率</th><th>級別</th><th>モーター2連対率</th><th>節間成績</th></tr></thead>
-            <tbody>${breakdownRows}</tbody>
+            <thead><tr><th>順位</th><th>3連単</th><th style="text-align:left;">選手</th><th>推定確率</th></tr></thead>
+            <tbody>${picksRows}</tbody>
           </table>
         </div>
       </details>
